@@ -1350,6 +1350,7 @@ async function telaAjustes() {
           await api('/admin/whatsapp/desconectar', { metodo: 'POST', corpo: {} }).catch(() => {});
           renderizarWhatsApp();
         });
+        let ultimoQr = st.qr;
         if (!S.zapIntervalo) {
           S.zapIntervalo = setInterval(async () => {
             const check = await api('/admin/whatsapp/status').catch(() => null);
@@ -1358,11 +1359,17 @@ async function telaAjustes() {
               S.zapIntervalo = null;
               aviso('WhatsApp conectado com sucesso!');
               renderizarWhatsApp();
-            } else if (check?.qr && check.qr !== st.qr) {
-              const el = document.getElementById('zap-qr-svg');
-              if (el) el.innerHTML = renderizarQr(check.qr);
+            } else if (check?.qr && check.qr !== ultimoQr) {
+              ultimoQr = check.qr;
+              const imgEl = document.querySelector('#zap-qr-svg img');
+              if (imgEl && check.qr.startsWith('data:image')) {
+                imgEl.src = check.qr;
+              } else {
+                const el = document.getElementById('zap-qr-svg');
+                if (el) el.innerHTML = renderizarQr(check.qr);
+              }
             }
-          }, 3000);
+          }, 2500);
         }
       } else if (st.status === 'connecting') {
         zapContainer.innerHTML = `
