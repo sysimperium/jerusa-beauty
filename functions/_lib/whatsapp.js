@@ -66,23 +66,40 @@ export async function desconectarZap(env) {
 
 export async function enviarMensagemZap(env, { numero, mensagem }) {
   const url = `${getZapUrl(env)}/mensagem/enviar`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': getZapKey(env),
-    },
-    body: JSON.stringify({
-      app_id: getAppId(env),
-      para: numero,
-      mensagem,
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `Erro ${res.status} ao enviar WhatsApp`);
+  const zapKey = getZapKey(env);
+  const appId = getAppId(env);
+
+  let ultimoErro = null;
+  // Tentativa com 1 retry automático (com intervalo de 2s) para cobrir eventual reconexão do gateway
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': zapKey,
+        },
+        body: JSON.stringify({
+          app_id: appId,
+          para: numero,
+          mensagem,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        return data;
+      }
+      ultimoErro = new Error(data.error || `Erro ${res.status} ao enviar WhatsApp`);
+    } catch (err) {
+      ultimoErro = err;
+    }
+
+    if (tentativa < 2) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
-  return data;
+
+  throw ultimoErro || new Error('Falha ao enviar WhatsApp');
 }
 
 export async function notificarAgendamentoZap(env, cfg, agendamento) {
