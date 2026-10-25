@@ -1,5 +1,5 @@
 import { rota } from './router.js';
-import { notificarAgendamentoZap, extrairDiaMesAniversario } from './whatsapp.js';
+import { notificarAgendamentoZap, notificarCancelamentoZap, extrairDiaMesAniversario } from './whatsapp.js';
 import { erro, json, inteiro, texto, normalizarWhatsapp, carregarConfig } from './util.js';
 import { aleatorioHex } from './auth.js';
 import { agoraLocal, dataValida, diaSemana, inicioEmMs } from './time.js';
@@ -130,7 +130,7 @@ async function buscarPorToken(db, token) {
   if (!/^[a-f0-9]{32}$/.test(token)) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
   const a = await db.prepare(
     `SELECT a.id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco, a.referencia, a.preco_tabela_centavos,
-            a.status, c.nome AS cliente_nome
+            a.status, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
      FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id WHERE a.token = ?1`).bind(token).first();
   if (!a) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
   const { results } = await db.prepare(
@@ -149,7 +149,7 @@ rota('GET', '/publico/agendamento/:token', async ({ db, params }) => {
   return json({ ...resto, pode_cancelar: podeCancelar(a, cfg), cancelar_horas: cfg.cancelar_horas, whatsapp: cfg.whatsapp, nome_negocio: cfg.nome_negocio });
 });
 
-rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, params }) => {
+rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, env, params }) => {
   const cfg = await carregarConfig(db);
   const a = await buscarPorToken(db, params.token);
   if (a.status === 'cancelado') return json({ ok: true });
@@ -159,5 +159,20 @@ rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, params }) => {
       `O prazo para cancelar pelo link é de ${cfg.cancelar_horas}h antes do horário. Fale direto com a manicure.`);
   }
   await db.prepare(`UPDATE agendamentos SET status = 'cancelado' WHERE id = ?1 AND status = 'agendado'`).bind(a.id).run();
+
+  // Disparo automático do WhatsApp sobre o cancelamento para a cliente e para a profissional
+  try {
+    await notificarCancelamentoZap(env, cfg, {
+      cliente_nome: a.cliente_nome,
+      cliente_whatsapp: a.cliente_whatsapp,
+      data: a.data,
+      inicio_min: a.inicio_min,
+      servicos: a.servicos,
+      cancelado_por_admin: false,
+    });
+  } catch (err) {
+    console.error('Falha ao enviar notificação de cancelamento WhatsApp:', err);
+  }
+
   return json({ ok: true });
 });

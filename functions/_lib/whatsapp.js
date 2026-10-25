@@ -167,6 +167,59 @@ Acesse o seu painel para gerenciar:
   }
 }
 
+export async function notificarCancelamentoZap(env, cfg, agendamento) {
+  try {
+    const { cliente_nome, cliente_whatsapp, data, inicio_min, servicos, cancelado_por_admin = false } = agendamento;
+    if (!cliente_whatsapp && !cfg?.whatsapp) return;
+
+    const [ano, mes, dia] = data.split('-');
+    const dataFmt = `${dia}/${mes}/${ano}`;
+    const diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+    const dSemana = diasSemana[new Date(`${data}T00:00:00Z`).getUTCDay()];
+    const horaFmt = String(Math.floor(inicio_min / 60)).padStart(2, '0') + ':' + String(inicio_min % 60).padStart(2, '0');
+    const servicosTexto = servicos && servicos.length > 0 ? servicos.map((s) => s.nome).join(', ') : 'Atendimento';
+    const nomeNegocio = cfg?.nome_negocio || 'Jerusa Beauty';
+
+    // 1. Mensagem para a CLIENTE (sem "O horário foi liberado com sucesso")
+    if (cliente_whatsapp) {
+      const msgCliente =
+`Olá, *${cliente_nome}*! 👋
+
+Confirmamos o cancelamento do seu atendimento na *${nomeNegocio}* marcado para ${dataFmt} (${dSemana}) às ${horaFmt}.
+
+Quando quiser agendar um novo momento de autocuidado, estamos sempre à disposição por aqui ou pelo nosso site:
+👉 https://jerusa-beauty.pages.dev/ 💕`;
+
+      await enviarMensagemZap(env, {
+        numero: cliente_whatsapp,
+        mensagem: msgCliente,
+      }).catch(err => console.error('[WhatsApp] Erro ao enviar cancelamento para cliente:', err.message));
+    }
+
+    // 2. Alerta para a PROFISSIONAL (Jerusa) se o cancelamento foi feito pela cliente
+    const zapProfissional = cfg?.whatsapp ? normalizarWhatsapp(cfg.whatsapp) : null;
+    if (!cancelado_por_admin && zapProfissional) {
+      const msgProfissional =
+`⚠️ *Agendamento Cancelado pela Cliente!* ✨
+
+👤 *Cliente:* ${cliente_nome}
+📱 *WhatsApp:* ${cliente_whatsapp || 'Não informado'}
+📅 *Data:* ${dataFmt} (${dSemana})
+⏰ *Horário:* ${horaFmt}
+💅 *Serviço(s):* ${servicosTexto}
+
+O horário das ${horaFmt} está livre novamente na sua agenda!`;
+
+      await enviarMensagemZap(env, {
+        numero: zapProfissional,
+        mensagem: msgProfissional,
+      }).catch(err => console.error('[WhatsApp] Erro ao avisar profissional do cancelamento:', err.message));
+    }
+  } catch (err) {
+    console.error('Falha ao enviar notificação de cancelamento WhatsApp:', err);
+  }
+}
+
 export async function garantirColunasLembretes(db) {
   try {
     const info = await db.prepare('PRAGMA table_info(agendamentos)').all();

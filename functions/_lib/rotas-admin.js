@@ -507,7 +507,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
   ).bind(agora.data).first();
   const proximaData = proximaRow?.proxima_data || null;
 
-  const [hoje, proximoDia, resumo, receber, sumidos, proximos] = await Promise.all([
+  const [hoje, proximoDia, resumo, receber, sumidos, proximos, canceladosRecentes] = await Promise.all([
     listar(db, agora.data, agora.data, `AND a.status != 'cancelado'`),
     proximaData ? listar(db, proximaData, proximaData, `AND a.status != 'cancelado'`) : Promise.resolve([]),
     resumoMes(db, mes),
@@ -519,6 +519,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
        GROUP BY c.id HAVING MAX(a.data) <= ?2 ORDER BY MAX(a.data) DESC LIMIT 50`).bind(agora.data, addDias(agora.data, -diasSumido)).all(),
     db.prepare(`SELECT COUNT(*) AS n FROM agendamentos WHERE status = 'agendado' AND data > ?1 AND data <= ?2`)
       .bind(agora.data, addDias(agora.data, 7)).first(),
+    listar(db, agora.data, addDias(agora.data, 7), `AND a.status = 'cancelado'`),
   ]);
 
   const faturadoHoje = hoje.filter((a) => a.status === 'concluido').reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
@@ -544,6 +545,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
     sumidos: sumidos.results,
     alerta_sumidos_dias: diasSumido,
     proximos_7_dias: proximos.n,
+    cancelados_recentes: canceladosRecentes,
   });
 }, { admin: true });
 

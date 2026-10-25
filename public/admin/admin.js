@@ -429,6 +429,7 @@ async function telaInicio() {
   if (p.a_receber_qtd > 0) alertasQtd++;
   if (p.proximos_7_dias <= 3) alertasQtd++;
   if (p.sumidos.length > 0) alertasQtd++;
+  if (p.cancelados_recentes && p.cancelados_recentes.length > 0) alertasQtd++;
 
   const oculto = !!S.ocultarValores;
 
@@ -501,6 +502,28 @@ async function telaInicio() {
           <div class="card-alerta-texto">${moeda(p.a_receber_total_centavos)} a receber em <strong>${p.a_receber_qtd} atendimento(s)</strong> concluído(s).</div>
         </div>
         <button class="botao sec pequeno" id="acao-cobrar">Cobrar</button>
+      </div>` : ''}
+
+      ${(p.cancelados_recentes && p.cancelados_recentes.length > 0) ? `
+      <div class="card-alerta alerta-cancelamentos" style="border-left:4px solid #ef4444;background:#fff5f5">
+        <div class="card-alerta-conteudo">
+          <div class="card-alerta-titulo" style="color:#b91c1c">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            <span>Cancelamentos recentes (${p.cancelados_recentes.length})</span>
+          </div>
+          <div class="card-alerta-texto" style="color:#7f1d1d">
+            <strong>${p.cancelados_recentes.length} horário(s) desmarcado(s)</strong> recentemente nos próximos dias.
+            <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+              ${p.cancelados_recentes.slice(0, 3).map((c) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px solid #fee2e2">
+                  <span><strong>${esc(c.cliente_nome)}</strong> · ${dataCurta(c.data)} às ${hora(c.inicio_min)}</span>
+                  ${c.cliente_whatsapp ? `<a class="botao sec pequeno" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar no Zap</a>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <button class="botao sec pequeno" id="acao-ver-cancelados" style="border-color:#fca5a5;color:#b91c1c">Ver Agenda</button>
       </div>` : ''}
 
       <div class="card-alerta alerta-ocupacao">
@@ -586,6 +609,7 @@ async function telaInicio() {
     });
   }
   conteudo().querySelector('#ver-grade')?.addEventListener('click', () => ir('agenda'));
+  conteudo().querySelector('#acao-ver-cancelados')?.addEventListener('click', () => ir('agenda'));
   conteudo().querySelector('#acao-vencidos')?.addEventListener('click', () => { S.dia = S.hoje; ir('agenda'); });
   conteudo().querySelector('#acao-cobrar')?.addEventListener('click', () => ir('financeiro'));
   conteudo().querySelector('#acao-divulgar')?.addEventListener('click', folhaDivulgarAgenda);
@@ -620,6 +644,20 @@ async function telaAgenda() {
     </div>
     ${dia !== S.hoje ? '<p style="text-align:center;margin-top:10px"><button class="link" id="hojeb">Voltar para hoje</button></p>' : ''}
     ${bloqueios.map((b) => `<div class="aviso">Bloqueado${b.inicio_min === 0 && b.fim_min === 1440 ? ' o dia todo' : `: ${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ` · ${esc(b.motivo)}` : ''}</div>`).join('')}
+
+    ${outros.length > 0 ? `
+    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div>
+        <strong style="color:#991b1b;display:flex;align-items:center;gap:6px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
+          ${outros.length} cancelamento(s) / falta(s) neste dia
+        </strong>
+        <p class="pequeno" style="margin:2px 0 0;color:#7f1d1d">
+          ${outros.map(c => `<b>${esc(c.cliente_nome)}</b> (${hora(c.inicio_min)})`).join(', ')} — horário(s) livre(s) para novo agendamento ou encaixe.
+        </p>
+      </div>
+      <button class="botao sec pequeno" id="btn-abrir-cancelados" type="button" style="color:#991b1b;border-color:#fca5a5">Ver cancelados</button>
+    </div>` : ''}
 
     ${lista.length > 0 ? `
     <div class="segmentos-filtro" id="filtro-agenda">
@@ -674,6 +712,13 @@ async function telaAgenda() {
   c.querySelector('#hojeb')?.addEventListener('click', () => { S.dia = S.hoje; telaAgenda(); });
   c.querySelector('#pular').addEventListener('change', (e) => { if (e.target.value) { S.dia = e.target.value; telaAgenda(); } });
   c.querySelector('#novo').addEventListener('click', () => folhaNovo(dia, telaAgenda));
+  c.querySelector('#btn-abrir-cancelados')?.addEventListener('click', () => {
+    const det = c.querySelector('#secao-outros');
+    if (det) {
+      det.open = true;
+      det.scrollIntoView({ behavior: 'smooth' });
+    }
+  });
   c.querySelector('#bloquear').addEventListener('click', () => folhaBloquear(dia, telaAgenda));
 
   c.querySelectorAll('#filtro-agenda .filtro-btn').forEach((btn) => {
