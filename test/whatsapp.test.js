@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getZapUrl, getZapKey, getAppId, notificarAgendamentoZap } from '../functions/_lib/whatsapp.js';
+import {
+  getZapUrl,
+  getZapKey,
+  getAppId,
+  notificarAgendamentoZap,
+  notificarCancelamentoZap,
+} from '../functions/_lib/whatsapp.js';
 
 test('whatsapp: getZapUrl retorna URL padrão sem barra no final', () => {
   assert.equal(getZapUrl({}), 'https://meustudio-zap.onrender.com');
@@ -52,5 +58,70 @@ test('whatsapp: formatação da mensagem carinhosa de fidelização', async () =
   assert.match(msg, /Sentimos sua falta/);
   assert.match(msg, /https:\/\/jussara-esmalteria\.pages\.dev\//);
 });
+
+test('whatsapp: notificarAgendamentoZap envia apenas para a cliente e nunca para a profissional', async (t) => {
+  const chamadas = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    chamadas.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ sucesso: true }) };
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cfg = {
+    nome_negocio: 'Jerusa Beauty',
+    whatsapp: '8396677643', // Telefone da profissional
+  };
+  const agendamento = {
+    cliente_nome: 'Ana Clara',
+    cliente_whatsapp: '83988212971',
+    data: '2026-10-26',
+    inicio_min: 840,
+    servicos: [{ nome: 'Alongamento em Gel' }],
+    local: 'espaco',
+    token: 'tok_123',
+  };
+
+  await notificarAgendamentoZap({}, cfg, agendamento);
+
+  assert.equal(chamadas.length, 1, 'Deve enviar exatamente 1 mensagem');
+  assert.equal(chamadas[0].body.para, '5583988212971', 'Deve enviar para o número normalizado da cliente');
+  assert.match(chamadas[0].body.mensagem, /Olá, \*Ana Clara\*/);
+  assert.match(chamadas[0].body.mensagem, /https:\/\/jerusa-beauty\.pages\.dev\/\?a=tok_123/);
+});
+
+test('whatsapp: notificarCancelamentoZap envia apenas para a cliente e sem texto desnecessário', async (t) => {
+  const chamadas = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    chamadas.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ sucesso: true }) };
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cfg = {
+    nome_negocio: 'Jerusa Beauty',
+    whatsapp: '8396677643', // Telefone da profissional
+  };
+  const agendamento = {
+    cliente_nome: 'Camila Santos',
+    cliente_whatsapp: '83988212971',
+    data: '2026-10-26',
+    inicio_min: 840,
+    servicos: [{ nome: 'Manicure' }],
+    cancelado_por_admin: false,
+  };
+
+  await notificarCancelamentoZap({}, cfg, agendamento);
+
+  assert.equal(chamadas.length, 1, 'Deve enviar exatamente 1 mensagem de cancelamento');
+  assert.equal(chamadas[0].body.para, '5583988212971', 'Deve enviar para o número da cliente');
+  assert.doesNotMatch(chamadas[0].body.mensagem, /liberado com sucesso/i, 'Não deve conter mensagem de horário liberado');
+});
+
 
 
