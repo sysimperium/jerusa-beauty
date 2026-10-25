@@ -76,7 +76,7 @@ export async function enviarMensagemZap(env, { numero, mensagem }) {
       const res = await fetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json; charset=utf-8',
           'x-api-key': zapKey,
         },
         body: JSON.stringify({
