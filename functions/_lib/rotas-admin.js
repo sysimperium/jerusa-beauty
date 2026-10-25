@@ -299,6 +299,7 @@ rota('POST', '/admin/agendamentos', async ({ db, env, corpo, waitUntil }) => {
   const cliente = await db.prepare('SELECT nome, whatsapp FROM clientes WHERE id = ?1').bind(clienteId).first();
   if (cliente?.whatsapp) {
     try {
+      const linkAgendamento = `${url.origin}/?a=${token}`;
       await notificarAgendamentoZap(env, cfg, {
         cliente_nome: cliente.nome,
         cliente_whatsapp: cliente.whatsapp,
@@ -308,6 +309,8 @@ rota('POST', '/admin/agendamentos', async ({ db, env, corpo, waitUntil }) => {
         endereco: local === 'domicilio' ? (corpo.endereco || '') : '',
         servicos,
         criado_por_admin: true,
+        token,
+        link: linkAgendamento,
       });
     } catch (err) {
       console.error('Falha ao enviar notificação WhatsApp admin:', err);
@@ -576,7 +579,7 @@ rota('POST', '/admin/whatsapp/teste', async ({ env, db, corpo }) => {
   const cfg = await carregarConfig(db);
   const destino = corpo?.numero ? normalizarWhatsapp(corpo.numero) : cfg.whatsapp;
   if (!destino) throw erro(400, 'dado_invalido', 'Nenhum número de WhatsApp informado.');
-  const nome = cfg.nome_negocio || 'Jussara Esmalteria';
+  const nome = cfg.nome_negocio || 'Jerusa Beauty';
   const mensagem = `🤖 *Teste de Notificação Automática - ${nome}*\n\nSeu WhatsApp está conectado com sucesso ao MeuStudio! As confirmações e lembretes de agendamento serão enviados automaticamente para suas clientes por aqui. ✨`;
   const r = await enviarMensagemZap(env, { numero: destino, mensagem });
   return json({ ok: true, resultado: r });

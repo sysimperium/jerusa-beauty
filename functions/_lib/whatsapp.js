@@ -87,7 +87,18 @@ export async function enviarMensagemZap(env, { numero, mensagem }) {
 
 export async function notificarAgendamentoZap(env, cfg, agendamento) {
   try {
-    const { cliente_nome, cliente_whatsapp, data, inicio_min, local, endereco, servicos, criado_por_admin = false } = agendamento;
+    const {
+      cliente_nome,
+      cliente_whatsapp,
+      data,
+      inicio_min,
+      local,
+      endereco,
+      servicos,
+      criado_por_admin = false,
+      token,
+      link,
+    } = agendamento;
     if (!cliente_whatsapp && !cfg?.whatsapp) return;
 
     const [ano, mes, dia] = data.split('-');
@@ -105,6 +116,10 @@ export async function notificarAgendamentoZap(env, cfg, agendamento) {
       : (endereco ? `A domicílio: ${endereco}` : 'A domicílio');
 
     const nomeNegocio = cfg?.nome_negocio || 'Jerusa Beauty';
+    const linkAgendamento = link || (token ? `https://jerusa-beauty.pages.dev/?a=${token}` : null);
+    const secaoLink = linkAgendamento
+      ? `\n\n🔗 *Ver detalhes ou cancelar horário:*\n${linkAgendamento}`
+      : '';
 
     // 1. Mensagem de confirmação para a CLIENTE
     if (cliente_whatsapp) {
@@ -116,9 +131,9 @@ Seu agendamento na *${nomeNegocio}* foi confirmado com sucesso!
 📅 *Data:* ${dataFmt} (${dSemana})
 ⏰ *Horário:* ${horaFmt}
 💅 *Serviço(s):* ${servicosTexto}
-📍 *Local:* ${localTexto}
+📍 *Local:* ${localTexto}${secaoLink}
 
-Qualquer dúvida ou caso precise reagendar, pode nos avisar por aqui. Estamos ansiosas para te atender! 💕`;
+Caso tenha algum imprevisto, você pode cancelar ou reagendar diretamente pelo link acima com antecedência. Estamos ansiosas para te atender! 💕`;
 
       await enviarMensagemZap(env, {
         numero: cliente_whatsapp,
@@ -192,6 +207,7 @@ export function formatarMensagemLembrete24h(cfg, a) {
     ? (cfg.endereco_espaco ? `No espaço (${cfg.endereco_espaco})` : 'No espaço de atendimento')
     : (a.endereco ? `A domicílio: ${a.endereco}` : 'A domicílio');
   const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+  const linkTexto = a.token ? `\n\n🔗 *Ver detalhes ou gerenciar:* https://jerusa-beauty.pages.dev/?a=${a.token}` : '';
 
   return `Olá, *${a.cliente_nome}*! 💕
 
@@ -200,7 +216,7 @@ Passando para lembrar do seu atendimento amanhã na *${nomeNegocio}*:
 📅 *Data:* ${dataFmt} (${dSemana})
 ⏰ *Horário:* ${horaFmt}
 💅 *Serviço(s):* ${servicosTexto}
-📍 *Local:* ${localTexto}
+📍 *Local:* ${localTexto}${linkTexto}
 
 Caso tenha algum imprevisto ou precise reagendar, avise por aqui com antecedência. Estamos te esperando! ✨`;
 }
@@ -234,7 +250,7 @@ export async function processarLembretes(db, env) {
   const dataLimite = addDias(dataHoje, 2);
 
   const { results: agendamentos } = await db.prepare(`
-    SELECT a.id, a.cliente_id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco,
+    SELECT a.id, a.cliente_id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco, a.token,
            a.status, a.criado_em, a.lembrete_24h_enviado, a.lembrete_2h_enviado,
            c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
     FROM agendamentos a

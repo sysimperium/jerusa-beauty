@@ -106,6 +106,7 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, waitUntil }) => {
 
   // Disparo automático do WhatsApp para a cliente e para a profissional
   try {
+    const linkAgendamento = `${url.origin}/?a=${token}`;
     await notificarAgendamentoZap(env, cfg, {
       cliente_nome: nome,
       cliente_whatsapp: whatsapp,
@@ -115,6 +116,8 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, waitUntil }) => {
       endereco,
       servicos,
       criado_por_admin: false,
+      token,
+      link: linkAgendamento,
     });
   } catch (err) {
     console.error('Falha ao enviar notificação WhatsApp:', err);
