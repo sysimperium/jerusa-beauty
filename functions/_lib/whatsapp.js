@@ -1,5 +1,5 @@
 import { inicioEmMs, agoraLocal, addDias, diaSemana } from './time.js';
-import { carregarConfig } from './util.js';
+import { carregarConfig, normalizarWhatsapp } from './util.js';
 
 const DEFAULT_ZAP_URL = 'https://meustudio-zap.onrender.com';
 const DEFAULT_ZAP_KEY = 'meustudio_zap_secret_2026';
@@ -87,8 +87,8 @@ export async function enviarMensagemZap(env, { numero, mensagem }) {
 
 export async function notificarAgendamentoZap(env, cfg, agendamento) {
   try {
-    const { cliente_nome, cliente_whatsapp, data, inicio_min, local, endereco, servicos } = agendamento;
-    if (!cliente_whatsapp) return;
+    const { cliente_nome, cliente_whatsapp, data, inicio_min, local, endereco, servicos, criado_por_admin = false } = agendamento;
+    if (!cliente_whatsapp && !cfg?.whatsapp) return;
 
     const [ano, mes, dia] = data.split('-');
     const dataFmt = `${dia}/${mes}/${ano}`;
@@ -101,12 +101,14 @@ export async function notificarAgendamentoZap(env, cfg, agendamento) {
       : 'Atendimento';
 
     const localTexto = local === 'espaco'
-      ? (cfg.endereco_espaco ? `No espaço (${cfg.endereco_espaco})` : 'No espaço de atendimento')
+      ? (cfg?.endereco_espaco ? `No espaço (${cfg.endereco_espaco})` : 'No espaço de atendimento')
       : (endereco ? `A domicílio: ${endereco}` : 'A domicílio');
 
-    const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+    const nomeNegocio = cfg?.nome_negocio || 'Jerusa Beauty';
 
-    const mensagem =
+    // 1. Mensagem de confirmação para a CLIENTE
+    if (cliente_whatsapp) {
+      const msgCliente =
 `Olá, *${cliente_nome}*! ✨
 
 Seu agendamento na *${nomeNegocio}* foi confirmado com sucesso!
@@ -118,10 +120,33 @@ Seu agendamento na *${nomeNegocio}* foi confirmado com sucesso!
 
 Qualquer dúvida ou caso precise reagendar, pode nos avisar por aqui. Estamos ansiosas para te atender! 💕`;
 
-    await enviarMensagemZap(env, {
-      numero: cliente_whatsapp,
-      mensagem,
-    });
+      await enviarMensagemZap(env, {
+        numero: cliente_whatsapp,
+        mensagem: msgCliente,
+      }).catch(err => console.error('[WhatsApp] Erro ao enviar para cliente:', err.message));
+    }
+
+    // 2. Notificação de novo agendamento para a PROFISSIONAL (Jerusa)
+    const zapProfissional = cfg?.whatsapp ? normalizarWhatsapp(cfg.whatsapp) : null;
+    if (!criado_por_admin && zapProfissional) {
+      const msgProfissional =
+`🔔 *Novo Agendamento Recebido!* ✨
+
+👤 *Cliente:* ${cliente_nome}
+📱 *WhatsApp:* ${cliente_whatsapp || 'Não informado'}
+📅 *Data:* ${dataFmt} (${dSemana})
+⏰ *Horário:* ${horaFmt}
+💅 *Serviço(s):* ${servicosTexto}
+📍 *Local:* ${localTexto}
+
+Acesse o seu painel para gerenciar:
+👉 https://jerusa-beauty.pages.dev/admin/`;
+
+      await enviarMensagemZap(env, {
+        numero: zapProfissional,
+        mensagem: msgProfissional,
+      }).catch(err => console.error('[WhatsApp] Erro ao avisar profissional:', err.message));
+    }
   } catch (err) {
     console.error('Falha ao enviar notificação WhatsApp:', err);
   }

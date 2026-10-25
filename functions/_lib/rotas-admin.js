@@ -298,17 +298,19 @@ rota('POST', '/admin/agendamentos', async ({ db, env, corpo, waitUntil }) => {
   // Notifica a cliente via WhatsApp sobre o agendamento criado pela profissional
   const cliente = await db.prepare('SELECT nome, whatsapp FROM clientes WHERE id = ?1').bind(clienteId).first();
   if (cliente?.whatsapp) {
-    const notificacaoPromise = notificarAgendamentoZap(env, cfg, {
-      cliente_nome: cliente.nome,
-      cliente_whatsapp: cliente.whatsapp,
-      data: corpo.data,
-      inicio_min: inicio,
-      local,
-      endereco: local === 'domicilio' ? (corpo.endereco || '') : '',
-      servicos,
-    });
-    if (typeof waitUntil === 'function') {
-      waitUntil(notificacaoPromise);
+    try {
+      await notificarAgendamentoZap(env, cfg, {
+        cliente_nome: cliente.nome,
+        cliente_whatsapp: cliente.whatsapp,
+        data: corpo.data,
+        inicio_min: inicio,
+        local,
+        endereco: local === 'domicilio' ? (corpo.endereco || '') : '',
+        servicos,
+        criado_por_admin: true,
+      });
+    } catch (err) {
+      console.error('Falha ao enviar notificação WhatsApp admin:', err);
     }
   }
 

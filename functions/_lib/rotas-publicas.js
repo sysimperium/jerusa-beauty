@@ -104,18 +104,20 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, waitUntil }) => {
   });
   if (!ok) throw erro(409, 'horario_indisponivel', 'Esse horário acabou de ser ocupado. Escolha outro.');
 
-  // Disparo automático e assíncrono do WhatsApp para a cliente
-  const notificacaoPromise = notificarAgendamentoZap(env, cfg, {
-    cliente_nome: nome,
-    cliente_whatsapp: whatsapp,
-    data: corpo.data,
-    inicio_min: inicio,
-    local,
-    endereco,
-    servicos,
-  });
-  if (typeof waitUntil === 'function') {
-    waitUntil(notificacaoPromise);
+  // Disparo automático do WhatsApp para a cliente e para a profissional
+  try {
+    await notificarAgendamentoZap(env, cfg, {
+      cliente_nome: nome,
+      cliente_whatsapp: whatsapp,
+      data: corpo.data,
+      inicio_min: inicio,
+      local,
+      endereco,
+      servicos,
+      criado_por_admin: false,
+    });
+  } catch (err) {
+    console.error('Falha ao enviar notificação WhatsApp:', err);
   }
 
   return json({ token }, 201);
