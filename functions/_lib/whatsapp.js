@@ -221,6 +221,9 @@ export async function garantirColunasLembretes(db) {
     if (!colunas.includes('lembrete_2h_enviado')) {
       await db.prepare('ALTER TABLE agendamentos ADD COLUMN lembrete_2h_enviado INTEGER NOT NULL DEFAULT 0').run();
     }
+    if (!colunas.includes('cancelamento_dispensado')) {
+      await db.prepare('ALTER TABLE agendamentos ADD COLUMN cancelamento_dispensado INTEGER NOT NULL DEFAULT 0').run();
+    }
     const infoCli = await db.prepare('PRAGMA table_info(clientes)').all();
     const colunasCli = (infoCli.results || []).map((r) => r.name);
     if (!colunasCli.includes('ultimo_aviso_fidelizacao')) {

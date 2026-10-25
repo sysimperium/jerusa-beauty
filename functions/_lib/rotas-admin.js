@@ -12,7 +12,7 @@ import {
 } from './dominio.js';
 import {
   obterStatusZap, conectarZap, desconectarZap, enviarMensagemZap, notificarAgendamentoZap, processarLembretes, processarFidelizacao,
-  extrairDiaMesAniversario, processarAniversarios,
+  extrairDiaMesAniversario, processarAniversarios, garantirColunasLembretes,
 } from './whatsapp.js';
 
 const ip = (request) => request.headers.get('cf-connecting-ip') || 'local';
@@ -497,6 +497,7 @@ rota('GET', '/admin/financeiro', async ({ db, url }) => {
 }, { admin: true });
 
 rota('GET', '/admin/painel', async ({ db }) => {
+  await garantirColunasLembretes(db);
   const agora = agoraLocal();
   const mes = agora.data.slice(0, 7);
   const cfg = await carregarConfig(db);
@@ -519,7 +520,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
        GROUP BY c.id HAVING MAX(a.data) <= ?2 ORDER BY MAX(a.data) DESC LIMIT 50`).bind(agora.data, addDias(agora.data, -diasSumido)).all(),
     db.prepare(`SELECT COUNT(*) AS n FROM agendamentos WHERE status = 'agendado' AND data > ?1 AND data <= ?2`)
       .bind(agora.data, addDias(agora.data, 7)).first(),
-    listar(db, agora.data, addDias(agora.data, 7), `AND a.status = 'cancelado'`),
+    listar(db, agora.data, addDias(agora.data, 30), `AND a.status = 'cancelado' AND (a.cancelamento_dispensado IS NULL OR a.cancelamento_dispensado = 0)`),
   ]);
 
   const faturadoHoje = hoje.filter((a) => a.status === 'concluido').reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
@@ -547,6 +548,23 @@ rota('GET', '/admin/painel', async ({ db }) => {
     proximos_7_dias: proximos.n,
     cancelados_recentes: canceladosRecentes,
   });
+}, { admin: true });
+
+rota('POST', '/admin/agendamentos/:id/dispensar-cancelamento', async ({ db, params }) => {
+  await garantirColunasLembretes(db);
+  const id = inteiro(params.id, 1, 1e12, 'Id');
+  await db.prepare('UPDATE agendamentos SET cancelamento_dispensado = 1 WHERE id = ?1').bind(id).run();
+  return json({ ok: true, id });
+}, { admin: true });
+
+rota('POST', '/admin/agendamentos/dispensar-cancelamentos', async ({ db, corpo }) => {
+  await garantirColunasLembretes(db);
+  const ids = Array.isArray(corpo?.ids) ? corpo.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+  if (ids.length > 0) {
+    const placeholders = ids.map((_, i) => `?${i + 1}`).join(',');
+    await db.prepare(`UPDATE agendamentos SET cancelamento_dispensado = 1 WHERE id IN (${placeholders})`).bind(...ids).run();
+  }
+  return json({ ok: true, dispensados: ids });
 }, { admin: true });
 
 // ---------- whatsapp ----------

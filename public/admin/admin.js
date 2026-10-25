@@ -16,6 +16,25 @@ const valorDe = (a) => a.valor_cobrado_centavos ?? a.preco_tabela_centavos;
 const maps = (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 const saudacao = () => { const h = new Date(Date.now() - 3 * 3600000).getUTCHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
+function getCancelamentosDispensados() {
+  try {
+    const raw = localStorage.getItem('admin_cancelamentos_dispensados');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function dispensarCancelamentoLocal(id) {
+  try {
+    const list = getCancelamentosDispensados();
+    if (!list.includes(id)) {
+      list.push(id);
+      localStorage.setItem('admin_cancelamentos_dispensados', JSON.stringify(list));
+    }
+  } catch {}
+}
+
 const ICONES = {
   inicio: '<path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
   agenda: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
@@ -424,12 +443,17 @@ async function telaInicio() {
   const todosAtendimentos = [...p.agendamentos_hoje, ...(p.agendamentos_proximo_dia || [])];
   const diasSumido = p.alerta_sumidos_dias || 15;
 
+  const dispensadosIds = getCancelamentosDispensados();
+  const canceladosValidos = (p.cancelados_recentes || [])
+    .filter((c) => !dispensadosIds.includes(c.id) && !c.cancelamento_dispensado);
+  const canceladosExibir = canceladosValidos.slice(0, 5);
+
   let alertasQtd = 0;
   if (vencidosHoje.length > 0) alertasQtd++;
   if (p.a_receber_qtd > 0) alertasQtd++;
   if (p.proximos_7_dias <= 3) alertasQtd++;
   if (p.sumidos.length > 0) alertasQtd++;
-  if (p.cancelados_recentes && p.cancelados_recentes.length > 0) alertasQtd++;
+  if (canceladosExibir.length > 0) alertasQtd++;
 
   const oculto = !!S.ocultarValores;
 
@@ -504,20 +528,29 @@ async function telaInicio() {
         <button class="botao sec pequeno" id="acao-cobrar">Cobrar</button>
       </div>` : ''}
 
-      ${(p.cancelados_recentes && p.cancelados_recentes.length > 0) ? `
-      <div class="card-alerta alerta-cancelamentos" style="border-left:4px solid #ef4444;background:#fff5f5">
+      ${(canceladosExibir.length > 0) ? `
+      <div class="card-alerta alerta-cancelamentos" id="card-alerta-cancelamentos" style="border-left:4px solid #ef4444;background:#fff5f5">
         <div class="card-alerta-conteudo">
-          <div class="card-alerta-titulo" style="color:#b91c1c">
-            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-            <span>Cancelamentos recentes (${p.cancelados_recentes.length})</span>
+          <div class="card-alerta-titulo" style="color:#b91c1c;display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:6px">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              <span id="titulo-cancelados-qtd">Cancelamentos recentes (${canceladosExibir.length})</span>
+            </div>
+            ${canceladosExibir.length > 1 ? `<button type="button" class="link btn-fechar-todos-cancelados" style="font-size:.75rem;color:#b91c1c;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0">Dispensar todos</button>` : ''}
           </div>
           <div class="card-alerta-texto" style="color:#7f1d1d">
-            <strong>${p.cancelados_recentes.length} horário(s) desmarcado(s)</strong> recentemente nos próximos dias.
-            <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-              ${p.cancelados_recentes.slice(0, 3).map((c) => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-top:1px solid #fee2e2">
-                  <span><strong>${esc(c.cliente_nome)}</strong> · ${dataCurta(c.data)} às ${hora(c.inicio_min)}</span>
-                  ${c.cliente_whatsapp ? `<a class="botao sec pequeno" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar no Zap</a>` : ''}
+            <strong id="subtitulo-cancelados-qtd">${canceladosExibir.length} horário(s) desmarcado(s)</strong> recentemente na sua agenda.
+            <div id="lista-cancelados-painel" style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+              ${canceladosExibir.map((c) => `
+                <div class="linha-cancelado-item" data-id="${c.id}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid #fee2e2;gap:8px">
+                  <div style="min-width:0;flex:1">
+                    <span style="font-size:.85rem;display:block"><strong>${esc(c.cliente_nome)}</strong> · ${dataCurta(c.data)} às ${hora(c.inicio_min)}</span>
+                    <span style="font-size:.75rem;color:#991b1b;display:block">${esc((c.servicos || []).map((s) => s.nome).join(', ') || 'Atendimento')}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+                    ${c.cliente_whatsapp ? `<a class="botao sec pequeno btn-zap-cancelado" data-id="${c.id}" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar no Zap</a>` : ''}
+                    <button type="button" class="botao sec pequeno btn-fechar-cancelado" data-id="${c.id}" style="font-size:.75rem;padding:3px 8px;border-color:#fca5a5;color:#b91c1c;background:#fff">Fechar</button>
+                  </div>
                 </div>
               `).join('')}
             </div>
@@ -610,6 +643,49 @@ async function telaInicio() {
   }
   conteudo().querySelector('#ver-grade')?.addEventListener('click', () => ir('agenda'));
   conteudo().querySelector('#acao-ver-cancelados')?.addEventListener('click', () => ir('agenda'));
+
+  function dispensarCancelamentoItem(id) {
+    dispensarCancelamentoLocal(id);
+    api('/admin/agendamentos/' + id + '/dispensar-cancelamento', { method: 'POST' }).catch(() => {});
+    const itemEl = conteudo().querySelector(`.linha-cancelado-item[data-id="${id}"]`);
+    if (itemEl) itemEl.remove();
+
+    const restantes = conteudo().querySelectorAll('.linha-cancelado-item');
+    if (restantes.length === 0) {
+      conteudo().querySelector('#card-alerta-cancelamentos')?.remove();
+    } else {
+      const tit = conteudo().querySelector('#titulo-cancelados-qtd');
+      if (tit) tit.textContent = `Cancelamentos recentes (${restantes.length})`;
+      const sub = conteudo().querySelector('#subtitulo-cancelados-qtd');
+      if (sub) sub.textContent = `${restantes.length} horário(s) desmarcado(s)`;
+    }
+  }
+
+  conteudo().querySelectorAll('.btn-zap-cancelado').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.id);
+      if (id) dispensarCancelamentoItem(id);
+    });
+  });
+
+  conteudo().querySelectorAll('.btn-fechar-cancelado').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const id = Number(btn.dataset.id);
+      if (id) dispensarCancelamentoItem(id);
+    });
+  });
+
+  conteudo().querySelector('.btn-fechar-todos-cancelados')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const ids = Array.from(conteudo().querySelectorAll('.linha-cancelado-item')).map((el) => Number(el.dataset.id)).filter(Boolean);
+    ids.forEach((id) => dispensarCancelamentoLocal(id));
+    api('/admin/agendamentos/dispensar-cancelamentos', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }).catch(() => {});
+    conteudo().querySelector('#card-alerta-cancelamentos')?.remove();
+  });
   conteudo().querySelector('#acao-vencidos')?.addEventListener('click', () => { S.dia = S.hoje; ir('agenda'); });
   conteudo().querySelector('#acao-cobrar')?.addEventListener('click', () => ir('financeiro'));
   conteudo().querySelector('#acao-divulgar')?.addEventListener('click', folhaDivulgarAgenda);

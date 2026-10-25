@@ -123,5 +123,32 @@ test('whatsapp: notificarCancelamentoZap envia apenas para a cliente e sem texto
   assert.doesNotMatch(chamadas[0].body.mensagem, /liberado com sucesso/i, 'Não deve conter mensagem de horário liberado');
 });
 
+test('whatsapp: garantirColunasLembretes adiciona cancelamento_dispensado quando ausente', async () => {
+  const { garantirColunasLembretes } = await import('../functions/_lib/whatsapp.js');
+  const sqls = [];
+  const db = {
+    prepare(sql) {
+      sqls.push(sql);
+      return {
+        all: async () => {
+          if (sql.includes('table_info(agendamentos)')) {
+            return { results: [{ name: 'id' }, { name: 'data' }] };
+          }
+          if (sql.includes('table_info(clientes)')) {
+            return { results: [{ name: 'id' }] };
+          }
+          return { results: [] };
+        },
+        run: async () => ({}),
+      };
+    },
+  };
+
+  await garantirColunasLembretes(db);
+  const adicionouCancelamentoDispensado = sqls.some((s) => s.includes('ADD COLUMN cancelamento_dispensado'));
+  assert.equal(adicionouCancelamentoDispensado, true, 'Deve executar ALTER TABLE para adicionar cancelamento_dispensado');
+});
+
+
 
 
