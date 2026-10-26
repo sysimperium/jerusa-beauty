@@ -57,7 +57,7 @@ rota('GET', '/publico/disponibilidade', async ({ db, url }) => {
   return json({ hoje: agora.data, duracao_min: duracao, preco_centavos: preco, dias: resultado });
 });
 
-rota('POST', '/publico/agendar', async ({ db, env, corpo, waitUntil }) => {
+rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
   const cfg = await carregarConfig(db);
   const nome = texto(corpo.nome, 80, 'o nome', { obrigatorio: true, min: 2 });
   const whatsapp = normalizarWhatsapp(corpo.whatsapp);
@@ -106,7 +106,7 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, waitUntil }) => {
 
   // Disparo automático do WhatsApp para a cliente e para a profissional
   try {
-    const linkAgendamento = `${url.origin}/?a=${token}`;
+    const linkAgendamento = url?.origin ? `${url.origin}/?a=${token}` : (token ? `https://jerusa-beauty.pages.dev/?a=${token}` : null);
     await notificarAgendamentoZap(env, cfg, {
       cliente_nome: nome,
       cliente_whatsapp: whatsapp,

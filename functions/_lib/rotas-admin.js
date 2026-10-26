@@ -218,7 +218,7 @@ rota('GET', '/admin/agendamentos', async ({ db, url }) => {
   return json({ agendamentos: await listar(db, de, ate) });
 }, { admin: true });
 
-rota('POST', '/admin/agendamentos', async ({ db, env, corpo, waitUntil }) => {
+rota('POST', '/admin/agendamentos', async ({ db, env, corpo, url, waitUntil }) => {
   const cfg = await carregarConfig(db);
   const local = validarLocal(corpo.local, cfg);
   if (!dataValida(corpo.data)) throw erro(400, 'dado_invalido', 'Data inválida.');
@@ -299,7 +299,7 @@ rota('POST', '/admin/agendamentos', async ({ db, env, corpo, waitUntil }) => {
   const cliente = await db.prepare('SELECT nome, whatsapp FROM clientes WHERE id = ?1').bind(clienteId).first();
   if (cliente?.whatsapp) {
     try {
-      const linkAgendamento = `${url.origin}/?a=${token}`;
+      const linkAgendamento = url?.origin ? `${url.origin}/?a=${token}` : (token ? `https://jerusa-beauty.pages.dev/?a=${token}` : null);
       await notificarAgendamentoZap(env, cfg, {
         cliente_nome: cliente.nome,
         cliente_whatsapp: cliente.whatsapp,

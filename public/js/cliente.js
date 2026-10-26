@@ -169,11 +169,12 @@ function telaLocal() {
     app.querySelectorAll('[data-local]').forEach((x) => x.setAttribute('aria-pressed', x === b));
     app.querySelector('#continuar').disabled = false;
   }));
-  app.querySelector('#continuar').addEventListener('click', telaDados);
+  app.querySelector('#continuar').addEventListener('click', () => telaDados());
 }
 
 // ---------------------------------------------------------------- passo 4: dados
 function telaDados(erroMsg = '') {
+  if (typeof erroMsg !== 'string') erroMsg = '';
   const salvo = ler();
   const dom = S.local === 'domicilio';
   const t = totais();
