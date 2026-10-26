@@ -385,7 +385,7 @@ export function formatarMensagemFidelizacao(cfg, cliente, linkAgendamento) {
 
 Sentimos sua falta aqui na *${nomeNegocio}*! Já faz alguns dias desde o seu último atendimento com a gente. 💕
 
-Que tal reservar um tempinho para cuidar de você e renovar suas unhas? 💅
+Que tal reservar um tempinho para cuidar de você e renovar a sua beleza? ✨
 
 Você pode escolher o seu dia e horário com toda facilidade pelo nosso link:
 👉 ${linkAgendamento}
@@ -481,9 +481,9 @@ export function formatarMensagemAniversario(cfg, cliente, linkAgendamento) {
 
 Hoje é o seu dia especial e a *${nomeNegocio}* deseja a você um ano incrível, repleto de momentos felizes, saúde e realizações! 💕
 
-Para comemorar com muito carinho, você tem um *mimo especial* no seu próximo atendimento com a gente neste mês do seu aniversário! 💅🎁
+Que tal se presentear com um momento especial para cuidar de você e renovar a sua beleza? ✨
 
-Quando quiser reservar o seu momento exclusivo, é só acessar o link:
+Quando quiser reservar o seu horário, é só acessar o link:
 👉 ${linkAgendamento}
 
 Tenha um dia maravilhoso e iluminado! ✨`;

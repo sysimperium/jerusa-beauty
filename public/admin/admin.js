@@ -363,7 +363,7 @@ function folhaClientesSumidos(sumidos, diasConfig = 15, recarregar = null) {
           ${sumidos.map((c) => {
             const dias = Math.max(0, Math.round((new Date(S.hoje + 'T00:00:00Z') - new Date(c.ultimo_atendimento + 'T00:00:00Z')) / 86400000));
             const primeiroNome = c.nome.split(' ')[0];
-            const msgWhats = `Olá, ${primeiroNome}! Tudo bem? ✨ Sentimos sua falta aqui na Jerusa Beauty! Já faz alguns dias desde o seu último atendimento com a gente. 💕 Que tal reservar um tempinho para cuidar de você e renovar suas unhas? 💅 Você pode escolher o seu dia e horário pelo link: ${linkAgendamento}`;
+            const msgWhats = `Olá, ${primeiroNome}! Tudo bem? ✨ Sentimos sua falta aqui na Jerusa Beauty! Já faz alguns dias desde o seu último atendimento com a gente. 💕 Que tal reservar um tempinho para cuidar de você e renovar a sua beleza? ✨ Você pode escolher o seu dia e horário pelo link: ${linkAgendamento}`;
             return `
               <div class="item-simples" style="padding:12px 0">
                 <div>

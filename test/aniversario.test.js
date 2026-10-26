@@ -29,7 +29,7 @@ test('ehAniversarioHoje: identifica corretamente se a cliente faz aniversário n
   assert.equal(ehAniversarioHoje(clienteSem, '2026-10-25'), false);
 });
 
-test('formatarMensagemAniversario: gera texto elegante com nome e link', () => {
+test('formatarMensagemAniversario: gera texto elegante com nome e link sem prometer mimo ou limitar a unhas', () => {
   const cfg = { nome_negocio: 'Jerusa Beauty' };
   const cliente = { nome: 'Maria Silva' };
   const link = 'https://jerusa-beauty.pages.dev/';
@@ -37,6 +37,9 @@ test('formatarMensagemAniversario: gera texto elegante com nome e link', () => {
   const msg = formatarMensagemAniversario(cfg, cliente, link);
   assert.match(msg, /Maria/);
   assert.match(msg, /Jerusa Beauty/);
-  assert.match(msg, /mimo especial/i);
+  assert.match(msg, /se presentear|cuidar de voc/i);
+  assert.match(msg, /renovar a sua beleza/i);
+  assert.doesNotMatch(msg, /mimo/i);
+  assert.doesNotMatch(msg, /unhas/i);
   assert.match(msg, /https:\/\/jerusa-beauty\.pages\.dev\//);
 });
