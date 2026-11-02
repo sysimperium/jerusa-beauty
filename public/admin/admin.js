@@ -1305,6 +1305,14 @@ async function telaAjustes() {
       <div class="campo"><label for="c-pnome">Nome que aparece para quem paga</label><input id="c-pnome" maxlength="25" value="${esc(cfg.pix_nome)}" placeholder="Como está no banco (até 25 letras)"></div>
       <div class="campo"><label for="c-pcid">Cidade</label><input id="c-pcid" maxlength="15" value="${esc(cfg.pix_cidade)}" placeholder="Campina Grande"></div></section>
 
+    <section class="secao" id="secao-push">
+      <h2>Notificações no Celular (Web Push)</h2>
+      <p class="sub-texto">Receba alertas sonoros no celular assim que uma cliente agendar ou desmarcar um horário pelo site.</p>
+      <div id="push-conteudo" style="margin-top:14px">
+        <div class="suave pequeno" style="padding:12px 0">Verificando suporte a notificações...</div>
+      </div>
+    </section>
+
     <section class="secao" id="secao-whatsapp">
       <h2>WhatsApp — Notificações Automáticas</h2>
       <p class="sub-texto">Conecte seu WhatsApp para que suas clientes recebam confirmações imediatas e lembretes automáticos dos agendamentos.</p>
@@ -1393,6 +1401,149 @@ async function telaAjustes() {
       catch (e) { f.querySelector('#pmsg').innerHTML = `<div class="aviso erro" role="alert">${esc(e.message)}</div>`; }
     });
   }));
+
+  // Web Push — Notificações no celular
+  const pushContainer = $('#push-conteudo');
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
+
+  async function renderizarPush() {
+    if (!pushContainer) return;
+
+    const temSuporte = 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
+    if (!temSuporte) {
+      const ehIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+      if (ehIos) {
+        pushContainer.innerHTML = `
+          <div style="background:#fefce8;border:1px solid #fef08a;border-radius:12px;padding:14px">
+            <strong style="color:#854d0e">📱 Dica para iPhone / iPad</strong>
+            <p class="pequeno suave" style="margin:6px 0 0">Para receber alertas no iPhone, toque no botão de <strong>Compartilhar</strong> do Safari (ícone com a setinha para cima) e selecione <strong>"Adicionar à Tela de Início"</strong>. Abra pelo novo ícone para ativar as notificações.</p>
+          </div>
+        `;
+      } else {
+        pushContainer.innerHTML = `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px">
+            <p class="pequeno suave" style="margin:0">Seu navegador atual não suporta notificações Web Push.</p>
+          </div>
+        `;
+      }
+      return;
+    }
+
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      const permissao = Notification.permission;
+
+      if (sub && permissao === 'granted') {
+        pushContainer.innerHTML = `
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e"></span>
+                <strong style="color:#166534">Notificações Ativas neste Aparelho</strong>
+              </div>
+              <span class="pequeno suave">🟢 Pronto para receber</span>
+            </div>
+            <p class="pequeno suave" style="margin:0">Seu aparelho tocará e vibrará na mesma hora em que uma cliente fizer ou cancelar um agendamento.</p>
+            <div class="acoes duas" style="margin-top:4px">
+              <button class="botao sec pequeno" id="push-btn-teste" type="button">🧪 Enviar notificação de teste</button>
+              <button class="botao sec pequeno perigo" id="push-btn-desativar" type="button">🔕 Desativar neste aparelho</button>
+            </div>
+          </div>
+        `;
+
+        pushContainer.querySelector('#push-btn-teste')?.addEventListener('click', async (e) => {
+          const btn = e.target;
+          btn.disabled = true;
+          try {
+            await api('/admin/push/teste', { metodo: 'POST', corpo: {} });
+            aviso('Notificação de teste disparada! Verifique o alerta no seu aparelho.');
+          } catch (err) {
+            aviso(err.message || 'Erro ao disparar teste', true);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        pushContainer.querySelector('#push-btn-desativar')?.addEventListener('click', async () => {
+          if (!confirmar('Deseja desativar os alertas sonoros neste aparelho?')) return;
+          try {
+            await sub.unsubscribe().catch(() => {});
+            await api(`/admin/push/desinscrever?endpoint=${encodeURIComponent(sub.endpoint)}`, { metodo: 'DELETE' }).catch(() => {});
+            aviso('Notificações desativadas neste aparelho.');
+            renderizarPush();
+          } catch (err) {
+            aviso(err.message || 'Erro ao desativar', true);
+          }
+        });
+      } else {
+        const ehIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        const ehStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+        let dicaIos = '';
+        if (ehIos && !ehStandalone) {
+          dicaIos = `<p class="pequeno suave" style="margin:4px 0 0;color:#b45309">💡 No iPhone, recomendamos tocar em <strong>Compartilhar > Adicionar à Tela de Início</strong> para melhor estabilidade dos alertas.</p>`;
+        }
+
+        pushContainer.innerHTML = `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8"></span>
+              <strong>Alertas no Celular Desativados</strong>
+            </div>
+            <p class="pequeno suave" style="margin:0">Ative para ser alertada com som e vibração assim que uma cliente agendar ou desmarcar.</p>
+            ${dicaIos}
+            <div class="acoes" style="margin-top:6px">
+              <button class="botao pequeno" id="push-btn-ativar" type="button">🔔 Ativar Notificações no meu Celular</button>
+            </div>
+          </div>
+        `;
+
+        pushContainer.querySelector('#push-btn-ativar')?.addEventListener('click', async (e) => {
+          const btn = e.target;
+          btn.disabled = true;
+          btn.textContent = 'Solicitando permissão...';
+          try {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {
+              throw new Error('Permissão não concedida. Habilite as notificações nas configurações do navegador.');
+            }
+            btn.textContent = 'Configurando chaves...';
+            const { public_key } = await api('/admin/push/chave-publica');
+            const novaSub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(public_key),
+            });
+            const subJson = novaSub.toJSON();
+            await api('/admin/push/inscrever', {
+              metodo: 'POST',
+              corpo: {
+                endpoint: novaSub.endpoint,
+                p256dh: subJson.keys?.p256dh || '',
+                auth: subJson.keys?.auth || '',
+              },
+            });
+            aviso('Notificações no celular ativadas com sucesso! 🎉');
+            renderizarPush();
+          } catch (err) {
+            aviso(err.message || 'Erro ao ativar notificações', true);
+            btn.disabled = false;
+            btn.textContent = '🔔 Ativar Notificações no meu Celular';
+          }
+        });
+      }
+    } catch (err) {
+      pushContainer.innerHTML = `<p class="aviso erro pequeno">Erro ao carregar notificações: ${esc(err.message)}</p>`;
+    }
+  }
 
   // WhatsApp — Conexão e QR Code
   const zapContainer = $('#zap-conteudo');
@@ -1550,6 +1701,7 @@ async function telaAjustes() {
     }
   }
 
+  renderizarPush();
   renderizarWhatsApp();
 }
 
