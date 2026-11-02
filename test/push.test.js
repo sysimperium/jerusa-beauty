@@ -201,4 +201,75 @@ test('rotas admin push: endpoints de chave pública, inscrição e teste respond
   assert.equal(dataDel.ok, true);
 });
 
+test('push: notificarPushNovoAgendamento e notificarPushCancelamento formatam payloads corretamente', async () => {
+  const { notificarPushNovoAgendamento, notificarPushCancelamento } = await import('../functions/_lib/push.js');
+
+  const db = new MockD1();
+  let payloadEnviado = null;
+  const mockFetch = async (url, opts) => {
+    return { ok: true, status: 200 };
+  };
+
+  // Simula sem inscrições
+  const rVazio = await notificarPushNovoAgendamento(db, {}, {
+    cliente_nome: 'Larissa Manoela',
+    data: '2026-11-10',
+    inicio_min: 840,
+    local: 'espaco',
+    servicos: [{ nome: 'Unhas de Gel' }],
+    preco: 12000,
+    token: 'tok_teste',
+  });
+  assert.equal(rVazio.total, 0, 'Sem assinaturas deve retornar total 0 sem erro');
+
+  // Adiciona assinatura com chaves válidas
+  const clientKeys = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits']
+  );
+  const rawClientPub = await crypto.subtle.exportKey('raw', clientKeys.publicKey);
+  const clientP256dh = bytesToBase64Url(new Uint8Array(rawClientPub));
+  const authSecretBytes = new Uint8Array(16);
+  crypto.getRandomValues(authSecretBytes);
+  const clientAuth = bytesToBase64Url(authSecretBytes);
+
+  db.subscriptions.push({
+    id: 1,
+    endpoint: 'https://fcm.googleapis.com/fcm/send/sub_larissa',
+    p256dh: clientP256dh,
+    auth: clientAuth,
+  });
+
+  const rNovo = await notificarPushNovoAgendamento(
+    db,
+    {},
+    {
+      cliente_nome: 'Larissa Manoela',
+      data: '2026-11-10',
+      inicio_min: 840,
+      local: 'espaco',
+      servicos: [{ nome: 'Unhas de Gel' }],
+      preco: 12000,
+      token: 'tok_teste',
+    },
+    { fetchFn: mockFetch }
+  );
+  assert.equal(rNovo.enviados, 1, 'Deve enviar push de novo agendamento com sucesso');
+
+  const rCancel = await notificarPushCancelamento(
+    db,
+    {},
+    {
+      cliente_nome: 'Larissa Manoela',
+      data: '2026-11-10',
+      inicio_min: 840,
+      servicos: [{ nome: 'Unhas de Gel' }],
+    },
+    { fetchFn: mockFetch }
+  );
+  assert.equal(rCancel.enviados, 1, 'Deve enviar push de cancelamento com sucesso');
+});
+
+
 

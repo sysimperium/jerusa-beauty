@@ -1,5 +1,6 @@
 import { rota } from './router.js';
 import { notificarAgendamentoZap, notificarCancelamentoZap, extrairDiaMesAniversario } from './whatsapp.js';
+import { notificarPushNovoAgendamento, notificarPushCancelamento } from './push.js';
 import { erro, json, inteiro, texto, normalizarWhatsapp, carregarConfig } from './util.js';
 import { aleatorioHex } from './auth.js';
 import { agoraLocal, dataValida, diaSemana, inicioEmMs } from './time.js';
@@ -123,6 +124,23 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
     console.error('Falha ao enviar notificação WhatsApp:', err);
   }
 
+  // Notificação Web Push para o celular da profissional
+  try {
+    const promessaPush = notificarPushNovoAgendamento(db, env, {
+      cliente_nome: nome,
+      data: corpo.data,
+      inicio_min: inicio,
+      local,
+      servicos,
+      preco,
+      token,
+    });
+    if (waitUntil) waitUntil(promessaPush);
+    else await promessaPush;
+  } catch (err) {
+    console.error('Falha ao enviar notificação Web Push:', err);
+  }
+
   return json({ token }, 201);
 });
 
@@ -149,7 +167,7 @@ rota('GET', '/publico/agendamento/:token', async ({ db, params }) => {
   return json({ ...resto, pode_cancelar: podeCancelar(a, cfg), cancelar_horas: cfg.cancelar_horas, whatsapp: cfg.whatsapp, nome_negocio: cfg.nome_negocio });
 });
 
-rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, env, params }) => {
+rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, env, params, waitUntil }) => {
   const cfg = await carregarConfig(db);
   const a = await buscarPorToken(db, params.token);
   if (a.status === 'cancelado') return json({ ok: true });
@@ -172,6 +190,20 @@ rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, env, params })
     });
   } catch (err) {
     console.error('Falha ao enviar notificação de cancelamento WhatsApp:', err);
+  }
+
+  // Notificação Web Push de cancelamento para o celular da profissional
+  try {
+    const promessaPush = notificarPushCancelamento(db, env, {
+      cliente_nome: a.cliente_nome,
+      data: a.data,
+      inicio_min: a.inicio_min,
+      servicos: a.servicos,
+    });
+    if (waitUntil) waitUntil(promessaPush);
+    else await promessaPush;
+  } catch (err) {
+    console.error('Falha ao enviar notificação Web Push de cancelamento:', err);
   }
 
   return json({ ok: true });
