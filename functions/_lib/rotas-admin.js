@@ -14,6 +14,9 @@ import {
   obterStatusZap, conectarZap, desconectarZap, enviarMensagemZap, notificarAgendamentoZap, processarLembretes, processarFidelizacao,
   extrairDiaMesAniversario, processarAniversarios, garantirColunasLembretes,
 } from './whatsapp.js';
+import {
+  obterOuCriarChavesVapid, garantirTabelaPush, dispararPushParaTodos,
+} from './push.js';
 
 const ip = (request) => request.headers.get('cf-connecting-ip') || 'local';
 const mesValido = (m) => typeof m === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
@@ -648,6 +651,64 @@ rota('GET', '/admin/aniversariantes/hoje', async ({ db }) => {
     })),
   });
 }, { admin: true });
+
+// ---------- web push ----------
+rota('GET', '/admin/push/chave-publica', async ({ db }) => {
+  const { publicKey } = await obterOuCriarChavesVapid(db);
+  return json({ public_key: publicKey });
+}, { admin: true });
+
+rota('POST', '/admin/push/inscrever', async ({ db, corpo }) => {
+  if (!corpo?.endpoint || typeof corpo.endpoint !== 'string') {
+    throw erro(400, 'dado_invalido', 'Endpoint do push é obrigatório.');
+  }
+  if (!corpo?.p256dh || !corpo?.auth) {
+    throw erro(400, 'dado_invalido', 'Chaves p256dh e auth são obrigatórias.');
+  }
+  await garantirTabelaPush(db);
+  await db.prepare(`
+    INSERT INTO push_subscriptions (endpoint, p256dh, auth, criado_em)
+    VALUES (?1, ?2, ?3, ?4)
+    ON CONFLICT(endpoint) DO UPDATE SET
+      p256dh = excluded.p256dh,
+      auth = excluded.auth,
+      falhas_consecutivas = 0
+  `).bind(corpo.endpoint, corpo.p256dh, corpo.auth, Date.now()).run();
+  return json({ ok: true });
+}, { admin: true });
+
+rota('DELETE', '/admin/push/desinscrever', async ({ db, url, request }) => {
+  await garantirTabelaPush(db);
+  let endpoint = url.searchParams.get('endpoint');
+  if (!endpoint) {
+    try {
+      const txt = await request.text();
+      if (txt) {
+        const body = JSON.parse(txt);
+        endpoint = body.endpoint;
+      }
+    } catch {}
+  }
+  if (endpoint) {
+    await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?1').bind(endpoint).run();
+  }
+  return json({ ok: true });
+}, { admin: true });
+
+rota('POST', '/admin/push/teste', async ({ db, corpo }) => {
+  await garantirTabelaPush(db);
+  const payload = {
+    title: '🔔 Teste de Notificação Push',
+    body: 'Notificações ativas com sucesso! Seu celular vai tocar sempre que entrar um novo agendamento. ✨',
+    icon: '/img/icon-192.png',
+    badge: '/img/favicon.png',
+    tag: `push-teste-${Date.now()}`,
+    data: { url: '/admin/' },
+  };
+  const res = await dispararPushParaTodos(db, payload);
+  return json({ ok: true, resultado: res });
+}, { admin: true });
+
 
 
 

@@ -141,3 +141,64 @@ test('push: remove assinatura quando serviço push retorna 410 Gone ou 404', asy
   assert.equal(db.subscriptions.length, 0, 'A assinatura 410 Gone deve ser excluída automaticamente');
 });
 
+test('rotas admin push: endpoints de chave pública, inscrição e teste respondem corretamente', async () => {
+  // Importa router e rotas-admin
+  await import('../functions/_lib/rotas-admin.js');
+  const { despachar } = await import('../functions/_lib/router.js');
+
+  const db = new MockD1();
+  // Simula sessão de admin válida
+  db.prepareOriginal = db.prepare;
+  db.prepare = function (sql) {
+    if (sql.includes('SELECT expira_em FROM sessoes')) {
+      return {
+        bind: () => ({
+          first: async () => ({ expira_em: Date.now() + 3600000 }),
+        }),
+      };
+    }
+    return db.prepareOriginal(sql);
+  };
+
+  const headers = new Headers({
+    cookie: `sid=${'a'.repeat(32)}`,
+    origin: 'https://jerusa-beauty.pages.dev',
+  });
+
+  // 1. GET /admin/push/chave-publica
+  const reqKey = new Request('https://jerusa-beauty.pages.dev/api/admin/push/chave-publica', {
+    method: 'GET',
+    headers,
+  });
+  const resKey = await despachar({ request: reqKey, env: { DB: db } });
+  assert.equal(resKey.status, 200);
+  const dataKey = await resKey.json();
+  assert.ok(dataKey.public_key, 'Deve retornar a chave pública');
+
+  // 2. POST /admin/push/inscrever
+  const reqSub = new Request('https://jerusa-beauty.pages.dev/api/admin/push/inscrever', {
+    method: 'POST',
+    headers: { ...Object.fromEntries(headers.entries()), 'content-type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: 'https://push.apple.com/sub_test_1',
+      p256dh: 'BNcR...',
+      auth: 'auth123',
+    }),
+  });
+  const resSub = await despachar({ request: reqSub, env: { DB: db } });
+  assert.equal(resSub.status, 200);
+  const dataSub = await resSub.json();
+  assert.equal(dataSub.ok, true);
+
+  // 3. DELETE /admin/push/desinscrever
+  const reqDel = new Request('https://jerusa-beauty.pages.dev/api/admin/push/desinscrever?endpoint=https://push.apple.com/sub_test_1', {
+    method: 'DELETE',
+    headers,
+  });
+  const resDel = await despachar({ request: reqDel, env: { DB: db } });
+  assert.equal(resDel.status, 200);
+  const dataDel = await resDel.json();
+  assert.equal(dataDel.ok, true);
+});
+
+
