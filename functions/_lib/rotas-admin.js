@@ -701,7 +701,6 @@ rota('POST', '/admin/push/teste', async ({ db, corpo }) => {
     title: '🔔 Teste de Notificação Push',
     body: 'Notificações ativas com sucesso! Seu celular vai tocar sempre que entrar um novo agendamento. ✨',
     icon: '/img/icon-192.png',
-    badge: '/img/favicon.png',
     tag: `push-teste-${Date.now()}`,
     data: { url: '/admin/' },
   };

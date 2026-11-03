@@ -327,7 +327,6 @@ export async function notificarPushNovoAgendamento(db, env, agendamentoInfo, opt
       title: '💅 Novo Agendamento Recebido!',
       body: `👤 ${cliente_nome} agendou ${servicosTexto}\n📅 ${dataFmt} às ${horaFmt} (${localTexto})\n💰 R$ ${valorReais}`,
       icon: '/img/icon-192.png',
-      badge: '/img/favicon.png',
       tag: `agendamento-${token || Date.now()}`,
       data: { url: `/admin/?data=${data}` },
     };
@@ -353,7 +352,6 @@ export async function notificarPushCancelamento(db, env, agendamentoInfo, option
       title: '⚠️ Horário Cancelado',
       body: `${cliente_nome} desmarcou o atendimento de ${dataFmt} às ${horaFmt}.\nEsse horário já foi liberado na sua agenda para novas vagas.`,
       icon: '/img/icon-192.png',
-      badge: '/img/favicon.png',
       tag: `cancelamento-${Date.now()}`,
       data: { url: `/admin/?data=${data}` },
     };

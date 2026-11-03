@@ -1,6 +1,6 @@
 // Service worker: guarda a "casca" do app para abrir rápido e funcionar sem sinal.
 // Os dados (API) nunca são guardados: sempre vêm do servidor.
-const VERSAO = 'v9';
+const VERSAO = 'v10';
 const CACHE = `jussara-${VERSAO}`;
 const CASCA = [
   '/', '/admin/', '/css/app.css', '/js/comum.js', '/js/cliente.js', '/js/pix.js', '/js/vendor/qrcode.js',
@@ -53,7 +53,6 @@ self.addEventListener('push', (e) => {
   const options = {
     body: dados.body || 'Novo agendamento recebido!',
     icon: dados.icon || '/img/icon-192.png',
-    badge: dados.badge || '/img/favicon.png',
     vibrate: dados.vibrate || [200, 100, 200],
     tag: dados.tag || `push-${Date.now()}`,
     renotify: true,
