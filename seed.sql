@@ -15,7 +15,11 @@ INSERT OR IGNORE INTO config (chave, valor) VALUES
   ('pix_tipo', 'telefone'),
   ('pix_chave', '5583996677643'),
   ('pix_nome', 'Jerusa Beauty'),
-  ('pix_cidade', '');
+  ('pix_cidade', ''),
+  ('ramo_atividade', 'Manicure & Nail Designer'),
+  ('slogan', 'Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.'),
+  ('exibir_whatsapp_bio', '1'),
+  ('logo_customizada', '');
 
 -- Seg a sáb, 08:00–17:00, pausa 12:00–13:00. Domingo fechado.
 INSERT OR IGNORE INTO expediente (dia, ativo, inicio_min, fim_min, pausa_inicio_min, pausa_fim_min) VALUES

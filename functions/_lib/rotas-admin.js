@@ -99,8 +99,14 @@ rota('PUT', '/admin/config', async ({ db, corpo }) => {
       novo[k] = v ? String(v).trim().slice(0, 25) : '';
     } else if (k === 'pix_chave') {
       novo[k] = v ? String(v).trim().slice(0, 80) : '';
+    } else if (k === 'logo_customizada') {
+      const vStr = typeof v === 'string' ? v.trim() : '';
+      if (vStr && !vStr.startsWith('data:image/') && !vStr.startsWith('/') && !vStr.startsWith('http')) {
+        throw erro(400, 'dado_invalido', 'Formato de imagem inválido.');
+      }
+      novo[k] = vStr.slice(0, 500000);
     } else {
-      const max = { nome_negocio: 80, endereco_espaco: 200 }[k];
+      const max = { nome_negocio: 80, endereco_espaco: 200, ramo_atividade: 80, slogan: 250 }[k] || 250;
       novo[k] = texto(v, max, k.replace(/_/g, ' '));
     }
   }

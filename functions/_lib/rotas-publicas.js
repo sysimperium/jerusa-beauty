@@ -9,20 +9,46 @@ import {
   resolverServicos, dadosDoPeriodo, validarLocal, upsertCliente, criarAgendamento, anexarServicos,
 } from './dominio.js';
 
+export async function calcularTextoExpediente(db) {
+  try {
+    const { results = [] } = await db.prepare('SELECT dia, ativo FROM expediente ORDER BY dia ASC').all();
+    const ativos = results.filter((r) => r.ativo === 1).map((r) => r.dia);
+    if (ativos.length === 0) return 'Horário Marcado';
+    const nomes = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    if (ativos.length === 6 && !ativos.includes(0)) return 'Segunda a Sábado · Com horário marcado';
+    if (ativos.length === 7) return 'Segunda a Domingo · Com horário marcado';
+    if (ativos.length === 5 && ativos.join(',') === '1,2,3,4,5') return 'Segunda a Sexta · Com horário marcado';
+    if (ativos.length === 4 && ativos.join(',') === '2,3,4,5') return 'Terça a Sexta · Com horário marcado';
+    if (ativos.length === 5 && ativos.join(',') === '2,3,4,5,6') return 'Terça a Sábado · Com horário marcado';
+    const primeiro = nomes[ativos[0]];
+    const ultimo = nomes[ativos[ativos.length - 1]];
+    return `${primeiro} a ${ultimo} · Com horário marcado`;
+  } catch {
+    return 'Segunda a Sábado · Com horário marcado';
+  }
+}
+
 const idsDaQuery = (url) => (url.searchParams.get('servicos') || '').split(',').filter(Boolean).map(Number);
 
 rota('GET', '/publico/config', async ({ db }) => {
   const cfg = await carregarConfig(db);
-  const { results } = await db.prepare(
-    'SELECT id, nome, descricao, preco_centavos, duracao_min FROM servicos WHERE ativo = 1 ORDER BY ordem, id').all();
+  const [{ results }, diasTexto] = await Promise.all([
+    db.prepare('SELECT id, nome, descricao, preco_centavos, duracao_min FROM servicos WHERE ativo = 1 ORDER BY ordem, id').all(),
+    calcularTextoExpediente(db),
+  ]);
   return json({
     nome: cfg.nome_negocio,
     whatsapp: cfg.whatsapp,
+    ramo_atividade: cfg.ramo_atividade || 'Manicure & Nail Designer',
+    slogan: cfg.slogan ?? 'Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.',
+    exibir_whatsapp_bio: cfg.exibir_whatsapp_bio !== false,
+    logo_customizada: cfg.logo_customizada || '',
     atende_espaco: cfg.atende_espaco,
     atende_domicilio: cfg.atende_domicilio,
     endereco_espaco: cfg.atende_espaco ? cfg.endereco_espaco : '',
     cancelar_horas: cfg.cancelar_horas,
     janela_dias: cfg.janela_dias,
+    dias_expediente_texto: diasTexto,
     servicos: results,
   }, 200, { 'cache-control': 'no-store' });
 });

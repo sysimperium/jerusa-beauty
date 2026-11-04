@@ -1689,8 +1689,32 @@ async function telaAjustes() {
       </div></section>
 
     <section class="secao"><h2>Seu negócio</h2>
-      <div class="campo"><label for="c-nome">Nome</label><input id="c-nome" maxlength="80" value="${esc(cfg.nome_negocio)}"></div>
-      <div class="campo"><label for="c-whats">Seu WhatsApp</label><input id="c-whats" type="tel" inputmode="tel" value="${esc(mascaraWhatsapp(cfg.whatsapp))}" placeholder="(83) 98625-0499"><span class="dica">O cliente usa este número para avisar que marcou e para falar com você.</span></div>
+      <div class="campo" style="margin-bottom:18px">
+        <label>Logomarca / Foto de Apresentação</label>
+        <div style="display:flex;align-items:center;gap:14px;margin-top:6px">
+          <div style="position:relative;width:80px;height:80px;border-radius:18px;overflow:hidden;border:1px solid var(--linha);background:#f8f9fa;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+            <img id="preview-logo" src="${esc(cfg.logo_customizada || '/img/logo.png')}" alt="Logomarca" style="width:100%;height:100%;object-fit:cover;aspect-ratio:1/1;display:block">
+          </div>
+          <div>
+            <label for="c-logo-input" class="botao sec pequeno" style="cursor:pointer;display:inline-block">Escolher nova imagem</label>
+            <input type="file" id="c-logo-input" accept="image/*" style="display:none">
+            ${cfg.logo_customizada ? '<button type="button" class="link perigo pequeno" id="btn-remover-logo" style="display:block;margin-top:6px">Restaurar logo padrão</button>' : '<button type="button" class="link perigo pequeno" id="btn-remover-logo" style="display:none;margin-top:6px">Restaurar logo padrão</button>'}
+            <span class="dica" style="margin-top:4px">Aparece na Bio e no agendamento. Mantém o tamanho padrão e proporção quadrada automaticamente.</span>
+          </div>
+        </div>
+      </div>
+      <div class="campo"><label for="c-nome">Nome do seu negócio / Ateliê</label><input id="c-nome" maxlength="80" value="${esc(cfg.nome_negocio)}"></div>
+      <div class="campo"><label for="c-ramo">Especialidade / Ramo</label><input id="c-ramo" maxlength="80" value="${esc(cfg.ramo_atividade || '')}" placeholder="Ex: Nails Designer, Manicure & Pedicure"><span class="dica">Exibido na Bio logo abaixo do seu nome.</span></div>
+      <div class="campo"><label for="c-slogan">Slogan ou Frase da Bio</label><textarea id="c-slogan" rows="2" maxlength="250" placeholder="Ex: Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.">${esc(cfg.slogan || '')}</textarea><span class="dica">Apresentação marcante exibida na Bio. Deixe em branco se preferir ocultar.</span></div>
+      <div class="campo">
+        <label for="c-whats">Seu WhatsApp</label>
+        <input id="c-whats" type="tel" inputmode="tel" value="${esc(mascaraWhatsapp(cfg.whatsapp))}" placeholder="(83) 98625-0499">
+        <label class="opcao-check" style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+          <input type="checkbox" id="c-whats-bio" ${cfg.exibir_whatsapp_bio ? 'checked' : ''}>
+          <span style="font-size:0.88rem;color:var(--suave)">Exibir botão "Falar no WhatsApp" na página da Bio</span>
+        </label>
+        <span class="dica">O cliente usa este número para avisar que marcou e para falar com você.</span>
+      </div>
       <label class="interruptor"><span>Atendo com meu espaço</span><input type="checkbox" id="c-esp" ${cfg.atende_espaco ? 'checked' : ''}><span class="trilho"></span></label>
       <div class="campo" id="c-end-w"><label for="c-end">Endereço do espaço</label><input id="c-end" maxlength="200" value="${esc(cfg.endereco_espaco)}"></div>
       <label class="interruptor"><span>Atendo a domicílio</span><input type="checkbox" id="c-dom" ${cfg.atende_domicilio ? 'checked' : ''}><span class="trilho"></span></label>
@@ -1799,6 +1823,53 @@ async function telaAjustes() {
   $('#copiar-bio')?.addEventListener('click', async () => aviso((await copiar(linkBio)) ? 'Link da Bio copiado! Cole com seu Instagram.' : 'Não deu para copiar', false));
   $('#copiar')?.addEventListener('click', async () => aviso((await copiar(link)) ? 'Link de agendamento copiado!' : 'Não deu para copiar', false));
   $('#c-whats')?.addEventListener('input', (e) => { e.target.value = mascaraWhatsapp(e.target.value); });
+
+  let logoCustomizada = cfg.logo_customizada || '';
+
+  $('#c-logo-input')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      aviso('Por favor selecione um arquivo de imagem.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const TAM = 400;
+        canvas.width = TAM;
+        canvas.height = TAM;
+        const ctx = canvas.getContext('2d');
+        const minDim = Math.min(img.width, img.height);
+        const sx = (img.width - minDim) / 2;
+        const sy = (img.height - minDim) / 2;
+        ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, TAM, TAM);
+        logoCustomizada = canvas.toDataURL('image/jpeg', 0.85);
+
+        const preview = $('#preview-logo');
+        if (preview) preview.src = logoCustomizada;
+        const btnRem = $('#btn-remover-logo');
+        if (btnRem) btnRem.style.display = 'block';
+        aviso('Imagem carregada! Clique em "Salvar ajustes" para confirmar.');
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  $('#btn-remover-logo')?.addEventListener('click', () => {
+    logoCustomizada = '';
+    const preview = $('#preview-logo');
+    if (preview) preview.src = '/img/logo.png';
+    const btnRem = $('#btn-remover-logo');
+    if (btnRem) btnRem.style.display = 'none';
+    const inputF = $('#c-logo-input');
+    if (inputF) inputF.value = '';
+    aviso('Logo restaurada para o padrão! Clique em "Salvar ajustes" para confirmar.');
+  });
+
   const endVis = () => { $('#c-end-w').hidden = !$('#c-esp').checked; }; endVis(); $('#c-esp')?.addEventListener('change', endVis);
   let tipo = ['cpf', 'cnpj', 'telefone', 'email', 'aleatoria'].includes(cfg.pix_tipo) ? cfg.pix_tipo : 'telefone';
   c.querySelectorAll('#c-tipo button').forEach((b) => b.addEventListener('click', () => { tipo = b.dataset.t; c.querySelectorAll('#c-tipo button').forEach((x) => x.setAttribute('aria-pressed', x === b)); }));
@@ -1808,17 +1879,34 @@ async function telaAjustes() {
     if (btn) btn.disabled = true;
     try {
       const corpo = {
-        nome_negocio: $('#c-nome').value, whatsapp: $('#c-whats').value, atende_espaco: $('#c-esp').checked, endereco_espaco: $('#c-end').value,
-        atende_domicilio: $('#c-dom').checked, respiro_min: $('#c-resp').value, deslocamento_min: $('#c-desl').value, antecedencia_min: $('#c-ant').value,
-        janela_dias: $('#c-jan').value, passo_min: $('#c-passo').value, cancelar_horas: $('#c-canc').value, encaixar_colado: $('#c-col').checked,
+        nome_negocio: $('#c-nome').value,
+        ramo_atividade: $('#c-ramo') ? $('#c-ramo').value.trim() : '',
+        slogan: $('#c-slogan') ? $('#c-slogan').value.trim() : '',
+        whatsapp: $('#c-whats').value,
+        exibir_whatsapp_bio: $('#c-whats-bio') ? $('#c-whats-bio').checked : true,
+        logo_customizada: logoCustomizada,
+        atende_espaco: $('#c-esp').checked,
+        endereco_espaco: $('#c-end').value,
+        atende_domicilio: $('#c-dom').checked,
+        respiro_min: $('#c-resp').value,
+        deslocamento_min: $('#c-desl').value,
+        antecedencia_min: $('#c-ant').value,
+        janela_dias: $('#c-jan').value,
+        passo_min: $('#c-passo').value,
+        cancelar_horas: $('#c-canc').value,
+        encaixar_colado: $('#c-col').checked,
         alerta_sumidos_dias: $('#c-sumidos').value,
-        pix_tipo: tipo, pix_chave: $('#c-chave').value, pix_nome: $('#c-pnome').value, pix_cidade: $('#c-pcid').value,
+        pix_tipo: tipo,
+        pix_chave: $('#c-chave').value,
+        pix_nome: $('#c-pnome').value,
+        pix_cidade: $('#c-pcid').value,
       };
       for (const k of ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias']) corpo[k] = Number(corpo[k]);
       const r2 = await seguro(() => api('/admin/config', { metodo: 'PUT', corpo }));
       if (r2) {
         S.config = r2.config;
         if (typeof cfg !== 'undefined') cfg = r2.config;
+        logoCustomizada = r2.config.logo_customizada || '';
         aviso('Ajustes salvos com sucesso!');
       }
     } finally {

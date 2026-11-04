@@ -41,9 +41,13 @@ export function normalizarWhatsapp(v) {
 }
 
 const NUM = ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias'];
-const BOOL = ['atende_espaco', 'atende_domicilio', 'encaixar_colado'];
+const BOOL = ['atende_espaco', 'atende_domicilio', 'encaixar_colado', 'exibir_whatsapp_bio'];
 const PADRAO = {
-  nome_negocio: 'Jussara Soares Esmalteria', whatsapp: '', endereco_espaco: '',
+  nome_negocio: 'Jerusa Beauty', whatsapp: '', endereco_espaco: '',
+  ramo_atividade: 'Manicure & Nail Designer',
+  slogan: 'Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.',
+  exibir_whatsapp_bio: true,
+  logo_customizada: '',
   respiro_min: 15, deslocamento_min: 15, antecedencia_min: 60, janela_dias: 30, passo_min: 30, cancelar_horas: 12,
   alerta_sumidos_dias: 15,
   atende_espaco: true, atende_domicilio: true, encaixar_colado: true,

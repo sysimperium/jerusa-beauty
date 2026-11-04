@@ -15,8 +15,9 @@ const selecionados = () => S.cfg.servicos.filter((s) => S.ids.has(s.id));
 const totais = () => selecionados().reduce((t, s) => ({ preco: t.preco + s.preco_centavos, min: t.min + s.duracao_min }), { preco: 0, min: 0 });
 
 function marca(titulo, sub, compacta = true) {
+  const logoSrc = S.cfg?.logo_customizada || '/img/logo.png';
   return `<header class="marca${compacta ? ' compacta' : ''}">
-    <img src="/img/logo.png" alt="${esc(S.cfg?.nome || 'Jussara Esmalteria')}" width="108" height="108">
+    <img src="${esc(logoSrc)}" alt="${esc(S.cfg?.nome || 'Jerusa Beauty')}" width="108" height="108" style="object-fit:cover;aspect-ratio:1/1;border-radius:18px;">
     <h1>${esc(titulo)}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</header>`;
 }
 function passos(atual, total) {

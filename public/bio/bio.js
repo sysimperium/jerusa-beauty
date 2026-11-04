@@ -1,27 +1,37 @@
-// Validação de licença e bloqueio da página de Bio/Links
-export async function checarStatusBio() {
+// Validação de licença e carregamento dinâmico da página de Bio/Links
+
+function mascaraWhatsapp(v) {
+  const d = String(v || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '').slice(0, 11);
+  if (d.length <= 2) return d ? `(${d}` : '';
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+export async function carregarBioDinamica() {
   const carregando = document.getElementById('bio-carregando');
   const container = document.getElementById('bio-container') || document.querySelector('.bio-container');
   const rodape = document.getElementById('bio-rodape') || document.querySelector('.bio-rodape');
 
+  // 1. Checa status da licença (bloqueio ou demo expirado)
   try {
-    const resp = await fetch('/api/licenca/status');
-    if (resp.ok) {
-      const lic = await resp.json();
+    const respLic = await fetch('/api/licenca/status');
+    if (respLic.ok) {
+      const lic = await respLic.json();
       if (lic && lic.bloqueado) {
         if (carregando) carregando.remove();
         if (rodape) rodape.remove();
 
         const isDemo = lic.motivo === 'demo_expirado' || lic.tipo_plano === 'demonstracao';
         const zap = lic.whatsapp_negociacao || '5583988212971';
-        const nomeCliente = lic.nome_cliente || document.querySelector('.bio-titulo')?.textContent || 'Aplicativo';
+        const nomeCliente = lic.nome_cliente || 'Aplicativo';
         const msgZap = encodeURIComponent(`Olá Ian! O período de demonstração do aplicativo ${nomeCliente} chegou ao fim e gostaria de negociar a contratação do sistema definitivo.`);
 
         if (container) {
           container.style.display = 'flex';
           container.innerHTML = `
             <div class="bio-retrato-topo" style="margin-top: 20px;">
-              <img src="/img/logo.png" alt="${nomeCliente}" class="bio-retrato">
+              <img src="/img/logo.png" alt="${nomeCliente}" class="bio-retrato" style="object-fit:cover;aspect-ratio:1/1">
             </div>
             <h1 class="bio-titulo" style="margin-top: 14px;">${isDemo ? 'Demonstração Finalizada' : 'Acesso Suspenso'}</h1>
             <div class="bio-subtitulo">${isDemo ? 'Período de Testes Concluído' : 'Acesso Temporariamente Suspenso'}</div>
@@ -52,13 +62,91 @@ export async function checarStatusBio() {
       }
     }
   } catch (e) {
-    // Modo offline ou falha de rede
+    // Modo offline ou rede instável continua para carregar dados
   }
 
-  // Se a licença não estiver bloqueada, exibe a bio normalmente
+  // 2. Carrega configurações do negócio (/api/publico/config)
+  try {
+    const respCfg = await fetch('/api/publico/config');
+    if (respCfg.ok) {
+      const cfg = await respCfg.json();
+      const nome = cfg.nome || 'Jerusa Beauty';
+      const primeiroNome = nome.split(' ')[0] || 'nossa equipe';
+
+      document.title = `${nome} — Links Oficiais`;
+
+      // Logomarca (com auto-ajuste e aspecto quadrado)
+      const imgEl = document.getElementById('bio-foto');
+      if (imgEl) {
+        imgEl.src = cfg.logo_customizada || '/img/logo-retrato.png';
+        imgEl.alt = nome;
+      }
+
+      // Ramo / Especialidade
+      const ramoEl = document.getElementById('bio-ramo');
+      if (ramoEl) {
+        ramoEl.textContent = cfg.ramo_atividade || 'Manicure & Nail Designer';
+      }
+
+      // Slogan / Frase de apresentação
+      const sloganEl = document.getElementById('bio-slogan');
+      if (sloganEl) {
+        const textoSlogan = (cfg.slogan ?? '').trim();
+        if (textoSlogan) {
+          sloganEl.textContent = textoSlogan;
+          sloganEl.style.display = 'block';
+        } else {
+          sloganEl.style.display = 'none';
+        }
+      }
+
+      // Botão Falar no WhatsApp
+      const whatsBtn = document.getElementById('bio-btn-whats');
+      if (whatsBtn) {
+        if (cfg.exibir_whatsapp_bio && cfg.whatsapp) {
+          whatsBtn.style.display = 'flex';
+          const subEl = document.getElementById('bio-whats-sub');
+          if (subEl) subEl.textContent = `${mascaraWhatsapp(cfg.whatsapp)} · Conversar com ${primeiroNome}`;
+          const msgZap = encodeURIComponent(`Olá, ${primeiroNome}! Vim pelo link da Bio e gostaria de informações.`);
+          whatsBtn.href = `https://wa.me/${cfg.whatsapp}?text=${msgZap}`;
+        } else {
+          whatsBtn.style.display = 'none';
+        }
+      }
+
+      // Atendimento Local
+      const txtLocal = document.getElementById('bio-txt-local');
+      if (txtLocal) {
+        if (cfg.atende_espaco && cfg.atende_domicilio) {
+          txtLocal.textContent = 'Atendimento no Espaço & a Domicílio';
+        } else if (cfg.atende_espaco) {
+          txtLocal.textContent = cfg.endereco_espaco ? `Atendimento no Espaço (${cfg.endereco_espaco})` : 'Atendimento exclusivo no Espaço';
+        } else if (cfg.atende_domicilio) {
+          txtLocal.textContent = 'Atendimento a Domicílio';
+        } else {
+          document.getElementById('bio-info-local')?.remove();
+        }
+      }
+
+      // Dias de Atendimento
+      const txtDias = document.getElementById('bio-txt-dias');
+      if (txtDias) {
+        txtDias.textContent = cfg.dias_expediente_texto || 'Com horário marcado';
+      }
+
+      // Rodapé
+      if (rodape) {
+        rodape.textContent = `${nome} © ${new Date().getFullYear()} · Todos os direitos reservados`;
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao carregar configurações dinâmicas da Bio:', err);
+  }
+
+  // 3. Exibe conteúdo após carregar
   if (carregando) carregando.remove();
   if (container) container.style.display = 'flex';
   if (rodape) rodape.style.display = 'block';
 }
 
-checarStatusBio();
+carregarBioDinamica();

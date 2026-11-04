@@ -46,6 +46,8 @@
       width: 100%;
       height: auto;
       max-width: 240px;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
       display: block;
       border-radius: 20px;
     }
@@ -189,11 +191,11 @@
   <div class="bio-container" id="bio-container" style="display: none;">
     <!-- Imagem oficial da Jerusa Beauty -->
     <div class="bio-retrato-topo">
-      <img src="/img/logo-retrato.png" alt="Jerusa Beauty" class="bio-retrato">
+      <img id="bio-foto" src="/img/logo-retrato.png" alt="Jerusa Beauty" class="bio-retrato">
     </div>
 
-    <div class="bio-subtitulo">Manicure & Nail Designer</div>
-    <p class="bio-bio">Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.</p>
+    <div class="bio-subtitulo" id="bio-ramo">Manicure & Nail Designer</div>
+    <p class="bio-bio" id="bio-slogan">Cuidado, elegância e beleza para suas unhas com atendimento exclusivo e personalizado.</p>
 
     <div class="bio-links">
       <!-- Botão 1: Agendamento Online -->
@@ -218,7 +220,7 @@
       </a>
 
       <!-- Botão 2: WhatsApp Oficial -->
-      <a href="https://wa.me/5583996677643?text=Ol%C3%A1%2C%20Jerusa!%20Vim%20pelo%20Instagram%20e%20gostaria%20de%20informa%C3%A7%C3%B5es." class="bio-btn bio-btn-whats" target="_blank" rel="noopener">
+      <a id="bio-btn-whats" href="https://wa.me/5583996677643?text=Ol%C3%A1%2C%20Jerusa!%20Vim%20pelo%20Instagram%20e%20gostaria%20de%20informa%C3%A7%C3%B5es." class="bio-btn bio-btn-whats" target="_blank" rel="noopener">
         <div class="bio-btn-conteudo">
           <div class="bio-icone">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
@@ -227,7 +229,7 @@
           </div>
           <div class="bio-btn-textos">
             <span class="bio-btn-titulo">Falar no WhatsApp</span>
-            <span class="bio-btn-sub">(83) 99667-7643 · Tire suas dúvidas</span>
+            <span class="bio-btn-sub" id="bio-whats-sub">(83) 99667-7643 · Tire suas dúvidas</span>
           </div>
         </div>
         <svg class="bio-seta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -238,19 +240,19 @@
 
     <!-- Informações de Atendimento -->
     <div class="bio-info-bloco">
-      <div class="bio-info-item">
+      <div class="bio-info-item" id="bio-info-local">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
           <circle cx="12" cy="10" r="3"/>
         </svg>
-        <span>Atendimento no Espaço & a Domicílio</span>
+        <span id="bio-txt-local">Atendimento no Espaço & a Domicílio</span>
       </div>
-      <div class="bio-info-item">
+      <div class="bio-info-item" id="bio-info-dias">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
           <polyline points="12 6 12 12 16 14"/>
         </svg>
-        <span>Segunda a Sábado · Com horário marcado</span>
+        <span id="bio-txt-dias">Segunda a Sábado · Com horário marcado</span>
       </div>
     </div>
   </div>
