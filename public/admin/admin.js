@@ -1,25 +1,22 @@
 import {
   esc, moeda, duracao, hora, campoParaMin, minParaCampo, dataLonga, dataCurta, diaSemanaCurto, diaDoMes, mesNome, mesAno, somaDias, somaMeses,
   lerDinheiro, centavosParaCampo, mascaraWhatsapp, linkWhatsapp, api, qrSvg, copiar, aviso, confirmar, ajustarExclusividadeServicos,
+  selecionarFaturasVisiveis, classificarEstiloFatura,
 } from '/js/comum.js';
 import { gerarBrCode } from '/js/pix.js';
 
 const raiz = document.getElementById('raiz');
 const S = {
   aba: 'inicio', dia: null, mes: null, hoje: null, config: null, servicos: null,
+  demoInfo: null,
+  licenca: null,
+  zapIntervalo: null,
   ocultarValores: (() => { try { return localStorage.getItem('admin_ocultar_valores') === '1'; } catch { return false; } })()
 };
-const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-const hojeLocal = () => new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
-const nomeLocal = (l) => (l === 'domicilio' ? 'Domicílio' : 'Espaço');
-const valorDe = (a) => a.valor_cobrado_centavos ?? a.preco_tabela_centavos;
-const maps = (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-const saudacao = () => { const h = new Date(Date.now() - 3 * 3600000).getUTCHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
 function getCancelamentosDispensados() {
   try {
-    const raw = localStorage.getItem('admin_cancelamentos_dispensados');
-    return raw ? JSON.parse(raw) : [];
+    return JSON.parse(localStorage.getItem('agenda_cancelamentos_dispensados') || '[]');
   } catch {
     return [];
   }
@@ -27,13 +24,21 @@ function getCancelamentosDispensados() {
 
 function dispensarCancelamentoLocal(id) {
   try {
-    const list = getCancelamentosDispensados();
-    if (!list.includes(id)) {
-      list.push(id);
-      localStorage.setItem('admin_cancelamentos_dispensados', JSON.stringify(list));
+    const lista = getCancelamentosDispensados();
+    const idStr = String(id);
+    if (!lista.includes(idStr)) {
+      lista.push(idStr);
+      localStorage.setItem('agenda_cancelamentos_dispensados', JSON.stringify(lista.slice(-100)));
     }
   } catch {}
 }
+let intervaloDemo = null;
+const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const hojeLocal = () => new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+const nomeLocal = (l) => (l === 'domicilio' ? 'Domicílio' : 'Espaço');
+const valorDe = (a) => a.valor_cobrado_centavos ?? a.preco_tabela_centavos;
+const maps = (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+const saudacao = () => { const h = new Date(Date.now() - 3 * 3600000).getUTCHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
 const ICONES = {
   inicio: '<path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
@@ -49,21 +54,179 @@ const icone = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[n]}</
 
 async function seguro(fn) {
   try { return await fn(); } catch (e) {
-    if (e.status === 401) { telaEntrada(); return null; }
+    if (e.status === 401) {
+      if (S.demoInfo) { telaDemoExpirado(); } else { telaEntrada(); }
+      return null;
+    }
+    if (e.status === 402) {
+      telaBloqueio(e.dados || { mensagem: e.message });
+      return null;
+    }
     aviso(e.message, true); return null;
   }
 }
 
 // ======================================================================== entrada
 async function iniciar() {
-  let est;
-  try { est = await api('/admin/estado'); } catch (e) {
-    raiz.innerHTML = `<div class="login"><div class="aviso erro">${esc(e.message)}</div></div>`; return;
+  const urlParams = new URLSearchParams(window.location.search);
+  const tokenDemoUrl = urlParams.get('demo');
+
+  if (tokenDemoUrl) {
+    raiz.innerHTML = '<main class="login"><p class="carregando-pagina">Ativando sua demonstração Jerusa Beauty…</p></main>';
+    try {
+      const respDemo = await api('/demo/entrar', { metodo: 'POST', corpo: { token: tokenDemoUrl } });
+      S.demoInfo = { ...respDemo, token: tokenDemoUrl };
+      try { localStorage.setItem('jerusabeauty_demo_info', JSON.stringify(S.demoInfo)); } catch {}
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (e) {
+      try { localStorage.removeItem('jerusabeauty_demo_info'); } catch {}
+      S.demoInfo = null;
+      return telaDemoInvalido(e.message);
+    }
+  } else {
+    try {
+      const salvo = localStorage.getItem('jerusabeauty_demo_info');
+      if (salvo) {
+        const parsed = JSON.parse(salvo);
+        if (parsed?.expira_em) {
+          if (Date.now() >= parsed.expira_em) {
+            localStorage.removeItem('jerusabeauty_demo_info');
+            S.demoInfo = null;
+            return telaDemoExpirado();
+          } else {
+            S.demoInfo = parsed;
+          }
+        }
+      }
+    } catch {}
   }
+
+  try {
+    S.licenca = await api('/licenca/status');
+    if (S.licenca?.bloqueado) {
+      return telaBloqueio(S.licenca);
+    }
+  } catch (e) {
+    console.warn('Falha ao checar status da licença:', e);
+  }
+
+  // Se a licença for mensalidade ou placom ativo (não demonstrativo), limpa dados de demo
+  if (S.licenca && S.licenca.tipo_placom !== 'demonstracao') {
+    if (intervaloDemo) clearInterval(intervaloDemo);
+    S.demoInfo = null;
+    try {
+      localStorage.removeItem('jerusabeauty_demo_info');
+    } catch {}
+  }
+
+  let est;
+  try {
+    est = await api('/admin/estado');
+  } catch (e) {
+    if (e.status === 402) {
+      return telaBloqueio(e.dados || { mensagem: e.message });
+    }
+    raiz.innerHTML = `<main class="login"><div class="aviso erro">${esc(e.message)}</div></main>`;
+    return;
+  }
+
+  if (S.demoInfo && !est.logado && S.demoInfo.token) {
+    try {
+      const respDemo = await api('/demo/entrar', { metodo: 'POST', corpo: { token: S.demoInfo.token } });
+      S.demoInfo = { ...respDemo, token: S.demoInfo.token };
+      try { localStorage.setItem('jerusabeauty_demo_info', JSON.stringify(S.demoInfo)); } catch {}
+      est = await api('/admin/estado');
+    } catch {
+      localStorage.removeItem('jerusabeauty_demo_info');
+      S.demoInfo = null;
+      return telaDemoExpirado();
+    }
+  }
+
   if (!est.configurado) return telaEntrada(true);
   if (!est.logado) return telaEntrada(false);
+
   S.hoje = hojeLocal(); S.dia = S.hoje; S.mes = S.hoje.slice(0, 7);
   montar();
+}
+
+function iniciarContadorDemo(expiraEm) {
+  if (intervaloDemo) clearInterval(intervaloDemo);
+  const atualizar = () => {
+    const rest = expiraEm - Date.now();
+    const el = document.getElementById('contador-demo');
+    if (rest <= 0) {
+      if (intervaloDemo) clearInterval(intervaloDemo);
+      try { localStorage.removeItem('jerusabeauty_demo_info'); } catch {}
+      S.demoInfo = null;
+      telaDemoExpirado();
+      return;
+    }
+    if (el) {
+      const totalSeg = Math.floor(rest / 1000);
+      const h = Math.floor(totalSeg / 3600);
+      const m = Math.floor((totalSeg % 3600) / 60);
+      const s = totalSeg % 60;
+      el.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+  };
+  atualizar();
+  intervaloDemo = setInterval(atualizar, 1000);
+}
+
+function telaDemoExpirado() {
+  if (intervaloDemo) clearInterval(intervaloDemo);
+  raiz.innerHTML = `<main class="login">
+    <img src="/img/logo.png" alt="Jerusa Beauty" width="120" height="120">
+    <h1 class="assinatura">Demonstração Encerrada</h1>
+    <p class="suave">Seu período de teste de <strong>Jerusa Beauty</strong> chegou ao fim.</p>
+    <div class="aviso info" style="margin: 1.5rem 0; text-align: left; line-height: 1.5;">
+      Gostou de experimentar o sistema com a sua marca e ver a facilidade na sua agenda, serviços e controle financeiro?<br><br>
+      Fale com nossa equipe pelo WhatsApp para ativar o seu aplicativo definitivo e começar a atender suas clientes agora mesmo!
+    </div>
+    <div class="acoes">
+      <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Testei a demonstração de Jerusa Beauty e gostaria de ativar meu aplicativo definitivo!')}" target="_blank" rel="noopener noreferrer" class="botao" style="display: block; text-align: center; text-decoration: none;">
+        Quero Ativar Meu App
+      </a>
+    </div>
+  </main>`;
+}
+
+function telaDemoInvalido(msg) {
+  if (intervaloDemo) clearInterval(intervaloDemo);
+  raiz.innerHTML = `<main class="login">
+    <img src="/img/logo.png" alt="Jerusa Beauty" width="120" height="120">
+    <h1 class="assinatura">Demonstração Indisponível</h1>
+    <div class="aviso erro" role="alert" style="margin: 1.5rem 0;">${esc(msg || 'O link de demonstração é inválido ou já expirou.')}</div>
+    <p class="suave">Se você solicitou um teste, entre em contato para receber um novo link de demonstração exclusivo.</p>
+    <div class="acoes" style="margin-top: 1.5rem;">
+      <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Tive problemas ao acessar meu link de teste de Jerusa Beauty. Poderia me enviar outro?')}" target="_blank" rel="noopener noreferrer" class="botao" style="display: block; text-align: center; text-decoration: none;">
+        Falar com Suporte com WhatsApp
+      </a>
+    </div>
+  </main>`;
+}
+
+function telaBloqueio(lic) {
+  if (intervaloDemo) clearInterval(intervaloDemo);
+  const isDemo = lic?.motivo === 'demo_expirado' || lic?.tipo_placom === 'demonstracao';
+  const zap = lic?.whatsapp_negociacao || '5583988212971';
+  const msgZap = encodeURIComponent('Olá Ian! O período de demonstração do aplicativo Jerusa Beauty chegou ao fim e gostaria de negociar a contratação do sistema definitivo.');
+  const linkZap = `https://wa.me/${zap}?text=${msgZap}`;
+
+  raiz.innerHTML = `<main class="login">
+    <img src="/img/logo.png" alt="Jerusa Beauty" width="120" height="120">
+    <h1 class="assinatura">${isDemo ? 'Demonstração Finalizada' : 'Acesso Suspenso'}</h1>
+    <div class="aviso erro" role="alert" style="margin: 1.5rem 0; text-align: left; line-height: 1.5;">
+      ${esc(lic?.mensagem || (isDemo ? 'O seu período de demonstração de 4 dias chegou ao fim.' : 'Acesso temporariamente suspenso por pendência financeira.'))}
+    </div>
+    <p class="suave">${isDemo ? 'Para ativar o seu aplicativo definitivo com agenda online e controle total da sua empresa, entre em contato para negociarmos a contratação.' : 'Regularize a sua mensalidade para reativar seu acesso e os agendamentos online de suas clientes.'}</p>
+    <div class="acoes" style="margin-top: 1.5rem;">
+      <a href="${linkZap}" target="_blank" rel="noopener noreferrer" class="botao" style="display: block; text-align: center; text-decoration: none;">
+        ${isDemo ? 'Negociar Contrato com WhatsApp: (83) 98821-2971' : 'Regularizar com WhatsApp'}
+      </a>
+    </div>
+  </main>`;
 }
 
 function telaEntrada(primeira = false, msg = '') {
@@ -93,9 +256,50 @@ function telaEntrada(primeira = false, msg = '') {
 
 // ======================================================================== casca
 function montar() {
-  raiz.innerHTML = `<div class="admin-corpo"><main class="coluna larga" id="conteudo"></main></div>
+  const bannerDemoCentral = (S.licenca && S.licenca.tipo_placom === 'demonstracao' && !S.licenca.bloqueado) ? `
+    <div class="barra-demo-topo" id="barra-demo">
+      <div class="demo-info-texto">
+        <span class="demo-badge">MODO DEMONSTRAÇÃO</span>
+        <span class="demo-saudacao">Período de testes: restam <strong>${S.licenca.dias_restantes_demo ?? 4} dia(s)</strong></span>
+      </div>
+      <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá Ian! Estou com período de testes do aplicativo Jerusa Beauty e gostaria de negociar a contratação do sistema definitivo.')}" target="_blank" rel="noopener noreferrer" class="botao-demo-cta">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2z"/></svg>
+        <span>Contratar Aplicativo Definitivo</span>
+      </a>
+    </div>` : '';
+
+  const bannerDemo = S.demoInfo ? `
+    <div class="barra-demo-topo" id="barra-demo">
+      <div class="demo-info-texto">
+        <span class="demo-badge">MODO DEMO</span>
+        <span class="demo-saudacao">${S.demoInfo.nome_prospect ? `Olá, <strong>${esc(S.demoInfo.nome_prospect)}</strong>! ` : ''}Tempo restante:</span>
+        <span id="contador-demo" class="demo-contador">--:--:--</span>
+      </div>
+      <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Estou testando a demonstração de Jerusa Beauty e gostaria de ativar minha licença definitiva.')}" target="_blank" rel="noopener noreferrer" class="botao-demo-cta">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2z"/></svg>
+        <span>Quero Meu App Definitivo</span>
+      </a>
+    </div>` : '';
+
+  const bannerLicenca = (S.licenca && S.licenca.aviso_atraso && S.licenca.tipo_placom !== 'demonstracao') ? `
+    <div class="barra-aviso-licenca">
+      <span>⚠️ <strong>Aviso:</strong> Sua mensalidade venceu há ${esc(String(S.licenca.dias_atraso))} dia(s). Regularize para manter o agendamento de clientes ativo.</span>
+      <div style="display:flex;gap:6px">
+        <button class="botao-aviso-cta" id="btn-pagar-aviso-topo" type="button" style="border:none;cursor:pointer">Pagar com Pix</button>
+        <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Gostaria de falar sobre a mensalidade de Jerusa Beauty.')}" target="_blank" rel="noopener noreferrer" class="botao-aviso-cta">Suporte</a>
+      </div>
+    </div>` : '';
+
+  raiz.innerHTML = `${bannerDemoCentral || bannerDemo}${bannerLicenca}<div class="admin-corpo"><main class="coluna larga" id="conteudo"></main></div>
     <div class="abas"><nav aria-label="Seções">${[['inicio', 'Início'], ['agenda', 'Agenda'], ['financeiro', 'Financeiro'], ['servicos', 'Serviços'], ['ajustes', 'Ajustes']]
       .map(([k, t]) => `<button data-aba="${k}" ${S.aba === k ? 'aria-current="page"' : ''}>${icone(k)}<span>${t}</span></button>`).join('')}</nav></div>`;
+
+  if (S.demoInfo) {
+    iniciarContadorDemo(S.demoInfo.expira_em);
+  }
+
+  document.getElementById('btn-pagar-aviso-topo')?.addEventListener('click', () => folhaMensalidades());
+
   raiz.querySelectorAll('[data-aba]').forEach((b) => b.addEventListener('click', () => ir(b.dataset.aba)));
   desenhar();
 }
@@ -124,6 +328,157 @@ function folha(html, aoAbrir) {
 }
 function fecharFolha() { document.getElementById('cortina')?.remove(); document.body.style.overflow = ''; }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharFolha(); });
+
+// ======================================================================== mensalidades do app (SysImperium Root)
+async function folhaMensalidades() {
+  if (S.licenca?.isento_mensalidade) return;
+  try {
+    S.licenca = await api('/licenca/status');
+  } catch (e) {
+    console.warn('Erro ao consultar licença:', e);
+  }
+  const lic = S.licenca;
+  const todasFaturas = Array.isArray(lic?.mensalidades) ? [...lic.mensalidades] : [];
+
+  // Se a lista remota ainda não tiver faturas salvas mas o cliente está com placom mensalidade,
+  // gera a fatura do ciclo atual para que a manicure sempre tenha o botão de pagar via Pix ativo
+  if (todasFaturas.length === 0 && lic?.tipo_placom === 'mensalidade') {
+    const hoje = hojeLocal();
+    const mesAtual = hoje.slice(0, 7);
+    const diaV = lic.dia_vencimento || (lic.vencimento ? parseInt(lic.vencimento.split('-')[2], 10) : 10);
+    const dataVenc = lic.vencimento || `${mesAtual}-${String(diaV).padStart(2, '0')}`;
+    todasFaturas.push({
+      id: 0,
+      mes_ano: mesAtual,
+      data_vencimento: dataVenc,
+      valor_centavos: lic.valor_mensalidade_centavos || 3999,
+      status: 'pendente'
+    });
+  }
+
+  const faturas = selecionarFaturasVisiveis(todasFaturas);
+  const pixRoot = lic?.pix || {
+    pix_tipo: 'cpf',
+    pix_chave: '02399058496',
+    pix_nome: 'Ian Souza Santos',
+    pix_cidade: 'Campina Grande'
+  };
+
+  folha(`
+    <h2>Minhas Mensalidades</h2>
+    <p class="suave">Acompanhe suas mensalidades e pague com Pix direto para a Central.</p>
+
+    ${faturas.length === 0 ? `
+      <p class="vazio" style="margin: 20px 0;">Nenhuma fatura lançada com momento.</p>
+    ` : `
+      <div class="lista-faturas" style="margin: 16px 0; display: flex; flex-direction: column; gap: 12px;">
+        ${faturas.map((f) => {
+          const pago = f.status === 'pago';
+          const estilo = classificarEstiloFatura(f);
+          const [ano, mes] = f.mes_ano.split('-');
+          const nomeMes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][parseInt(mes, 10) - 1];
+          const diaVenc = f.data_vencimento ? f.data_vencimento.split('-').reverse().join('/') : '';
+
+          return `
+            <div style="background: ${estilo.fundo}; border: ${estilo.borda}; border-radius: 12px; padding: 13px 15px; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <strong style="display: block; font-size: 0.98rem; color: var(--tinta);">${nomeMes} / ${ano}</strong>
+                  ${estilo.rotulo ? `
+                    <span style="display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; background: ${estilo.badgeFundo}; color: ${estilo.badgeCor};">
+                      ${estilo.rotulo}
+                    </span>
+                  ` : ''}
+                </div>
+                <span class="suave pequeno" style="margin-top: 3px; display: block;">
+                  Vencimento: <strong>${diaVenc}</strong> · <strong>${moeda(f.valor_centavos)}</strong>
+                </span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                ${pago ? `
+                  <span class="selo-texto ok" style="font-weight: 700;">✓ Pago</span>
+                ` : `
+                  ${pixRoot?.pix_chave ? `
+                    <button class="btn-pagar-pix ${estilo.tipo}" data-mes="${f.mes_ano}" data-valor="${f.valor_centavos}" type="button">
+                      Pagar Pix
+                    </button>
+                  ` : `
+                    <span class="selo-texto pend" style="font-weight: 600;">Pendente</span>
+                  `}
+                `}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+
+    <div class="acoes">
+      <button class="botao sec" id="btn-fechar-mensalidades">Fechar</button>
+    </div>
+  `, (c) => {
+    c.querySelector('#btn-fechar-mensalidades')?.addEventListener('click', fecharFolha);
+
+    c.querySelectorAll('.btn-pagar-pix').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mesAnoStr = btn.dataset.mes;
+        const valorCents = parseInt(btn.dataset.valor, 10);
+        abrirModalPixMensalidade(mesAnoStr, valorCents, pixRoot);
+      });
+    });
+  });
+}
+
+function abrirModalPixMensalidade(mesAnoStr, valorCents, pixRoot) {
+  try {
+    const payloadPix = gerarBrCode({
+      tipo: pixRoot.pix_tipo || 'cpf',
+      chave: pixRoot.pix_chave,
+      nome: pixRoot.pix_nome || 'SysImperium',
+      cidade: pixRoot.pix_cidade || 'Campina Grande',
+      valorCentavos: valorCents,
+      txid: `MENSAL${mesAnoStr.replace('-', '')}`,
+    });
+
+    const qr = qrSvg(payloadPix);
+
+    folha(`
+      <h2 style="text-align: center;">Pagar Mensalidade via Pix</h2>
+      <p class="suave" style="text-align: center; margin-bottom: 12px;">
+        Valor: <strong>${moeda(valorCents)}</strong> · Referência: <strong>${mesAnoStr}</strong>
+      </p>
+
+      <div style="display: flex; justify-content: center; margin: 12px 0;">
+        <div style="width: 200px; height: 200px; padding: 6px; background: #fff; border: 1.5px solid var(--linha); border-radius: 12px;">
+          ${qr}
+        </div>
+      </div>
+
+      <p class="suave pequeno" style="text-align: center; margin-bottom: 6px;">Ou copie o código Pix abaixo:</p>
+      <div style="background: var(--marfim); border: 1px solid var(--linha); border-radius: 8px; padding: 8px 10px; margin: 8px 0 16px 0; word-break: break-all; font-family: monospace; font-size: 0.72rem; color: var(--tinta); max-height: 70px; overflow-y: auto;">
+        ${esc(payloadPix)}
+      </div>
+
+      <div class="acoes" style="display:flex;flex-direction:column;gap:8px">
+        <button class="botao" id="btn-copiar-pix-mensalidade">📋 Copiar Código Pix</button>
+        <a href="https://wa.me/5583988212971?text=${encodeURIComponent(`Olá! Realizei o pagamento da mensalidade de ${mesAnoStr} de Jerusa Beauty com valor de ${moeda(valorCents)}. Segue o comprovante:`)}" target="_blank" rel="noopener noreferrer" class="botao sec" style="text-decoration:none;text-align:center">
+          💬 Enviar Comprovante com WhatsApp
+        </a>
+        <button class="botao sec" id="btn-voltar-mensalidades">Voltar às Mensalidades</button>
+      </div>
+    `, (c) => {
+      c.querySelector('#btn-copiar-pix-mensalidade')?.addEventListener('click', async () => {
+        await copiar(payloadPix);
+        aviso('Código Pix copiado! Cole com seu banco.');
+      });
+      c.querySelector('#btn-voltar-mensalidades')?.addEventListener('click', () => {
+        folhaMensalidades();
+      });
+    });
+  } catch (err) {
+    aviso(err.message, true);
+  }
+}
 
 // ======================================================================== atendimento (cartão + ações)
 function linhaAtendimento(a, agoraMin = null) {
@@ -170,7 +525,7 @@ function abrirAtendimento(a, recarregar) {
   const aberto = a.status === 'agendado';
   const agoraMinHoje = S.hoje ? (new Date(Date.now() - 3 * 3600000).getUTCHours() * 60 + new Date(Date.now() - 3 * 3600000).getUTCMinutes()) : null;
   const atrasado = aberto && a.data === S.hoje && agoraMinHoje != null && agoraMinHoje >= a.inicio_min + a.duracao_min;
-  const msgCliente = `Olá, ${a.cliente_nome.split(' ')[0]}! Confirmando seu horário: ${a.servicos.map((s) => s.nome).join(' + ')}, ${dataLonga(a.data)} às ${hora(a.inicio_min)}${dom ? ' (no seu endereço)' : ''}. Até lá! 💅`;
+  const msgCliente = `Olá, ${a.cliente_nome.split(' ')[0]}! Confirmando seu horário: ${a.servicos.map((s) => s.nome).join(' + ')}, ${dataLonga(a.data)} às ${hora(a.inicio_min)}${dom ? ' (com seu endereço)' : ''}. Até lá! 💅`;
   folha(`
     <h2>${esc(a.cliente_nome)}</h2>
     <p class="suave">${esc(dataLonga(a.data))}, ${hora(a.inicio_min)} às ${hora(a.inicio_min + a.duracao_min)} · ${nomeLocal(a.local)}</p>
@@ -189,8 +544,8 @@ function abrirAtendimento(a, recarregar) {
       ${aberto ? '<button class="botao" data-acao="concluir">Concluir atendimento</button>' : ''}
       ${a.status === 'concluido' && !a.pago ? '<button class="botao" data-acao="pagar">Marcar como pago</button>' : ''}
       ${a.status === 'concluido' && a.forma_pagamento === 'pix' && !a.pago ? '<button class="botao sec" data-acao="qr">Mostrar QR Pix</button>' : ''}
-      <a class="botao sec" href="${linkWhatsapp(a.cliente_whatsapp, aberto ? msgCliente : '')}">Falar no WhatsApp</a>
-      ${dom && a.endereco ? `<a class="botao sec" href="${maps(a.endereco)}" target="_blank" rel="noopener">Abrir no mapa</a>` : ''}
+      <a class="botao sec" href="${linkWhatsapp(a.cliente_whatsapp, aberto ? msgCliente : '')}">Falar com WhatsApp</a>
+      ${dom && a.endereco ? `<a class="botao sec" href="${maps(a.endereco)}" target="_blank" rel="noopener">Abrir com mapa</a>` : ''}
       ${aberto ? '<button class="botao sec" data-acao="remarcar">Remarcar</button>' : ''}
       ${aberto ? '<div class="acoes duas"><button class="botao sec" data-acao="faltou">Faltou</button><button class="botao perigo" data-acao="cancelar">Cancelar</button></div>' : ''}
       ${!aberto ? '<button class="botao sec" data-acao="reabrir">Voltar para agendado</button>' : ''}
@@ -242,11 +597,11 @@ function folhaRemarcadoSucesso(a, novaData, novoMin, recarregar) {
     <p class="suave">Novo agendamento salvo para <strong>${esc(a.cliente_nome)}</strong>:</p>
     <div class="aviso" style="margin:16px 0;background:rgba(212,175,55,.12);border-color:rgba(212,175,55,.4);color:var(--texto)">
       <strong style="font-size:16px;display:block">${esc(dataLonga(novaData))} às ${hora(novoMin)}</strong>
-      <span class="pequeno suave" style="display:block;margin-top:4px">${a.servicos.map((s) => esc(s.nome)).join(' + ')} · ${nomeLocal(a.local)}</span>
+      <span class="pequecom suave" style="display:block;margin-top:4px">${a.servicos.map((s) => esc(s.nome)).join(' + ')} · ${nomeLocal(a.local)}</span>
     </div>
     <p class="suave pequeno" style="margin-bottom:16px">Avise a cliente pelo WhatsApp para ela ficar ciente do novo horário.</p>
     <div class="acoes">
-      <a class="botao" href="${linkWhatsapp(a.cliente_whatsapp, msgWhats)}" target="_blank" rel="noopener">Avisar cliente no WhatsApp</a>
+      <a class="botao" href="${linkWhatsapp(a.cliente_whatsapp, msgWhats)}" target="_blank" rel="noopener">Avisar cliente com WhatsApp</a>
       <button class="botao sec" id="fechar-remarcado">Concluir</button>
     </div>`, (f) => {
     f.querySelector('#fechar-remarcado').addEventListener('click', () => { fecharFolha(); aviso('Horário atualizado'); recarregar(); });
@@ -255,15 +610,17 @@ function folhaRemarcadoSucesso(a, novaData, novoMin, recarregar) {
 
 function folhaConcluir(a, recarregar) {
   const tabela = a.preco_tabela_centavos;
+  const temPix = !!(S.config?.pix_chave && S.config.pix_chave.trim());
+  const formaPadrao = temPix ? 'pix' : 'dinheiro';
   folha(`<h2>Concluir atendimento</h2><p class="suave">${esc(a.cliente_nome)} · ${a.servicos.map((s) => esc(s.nome)).join(' + ')}</p>
     <div class="campo"><label for="valor">Valor cobrado (R$)</label><input id="valor" inputmode="decimal" value="${centavosParaCampo(tabela)}" autofocus>
       <span class="dica" id="dica">Valor de tabela: ${moeda(tabela)}</span></div>
     <div class="campo"><span class="rotulo">Forma de pagamento</span>
-      <div class="segmentos" id="forma">${[['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['cartao', 'Cartão']].map(([k, t], i) => `<button type="button" data-f="${k}" aria-pressed="${i === 0}">${t}</button>`).join('')}</div></div>
-    <label class="interruptor" style="margin-top:8px"><span>Já recebi o pagamento</span><input type="checkbox" id="pago"><span class="trilho"></span></label>
+      <div class="segmentos" id="forma">${[['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['cartao', 'Cartão']].map(([k, t]) => `<button type="button" data-f="${k}" aria-pressed="${k === formaPadrao}">${t}</button>`).join('')}</div></div>
+    <label class="interruptor" style="margin-top:8px"><span>Já recebi o pagamento</span><input type="checkbox" id="pago" ${formaPadrao !== 'pix' ? 'checked' : ''}><span class="trilho"></span></label>
     <div id="cmsg"></div>
     <div class="acoes"><button class="botao" id="cok">Concluir</button></div>`, (f) => {
-    let forma = 'pix';
+    let forma = formaPadrao;
     const valor = f.querySelector('#valor');
     const dica = f.querySelector('#dica');
     const atualizarDica = () => {
@@ -281,7 +638,7 @@ function folhaConcluir(a, recarregar) {
       const pago = f.querySelector('#pago').checked;
       try {
         await api(`/admin/agendamentos/${a.id}`, { metodo: 'PATCH', corpo: { status: 'concluido', valor_cobrado_centavos: v, forma_pagamento: forma, pago } });
-        if (forma === 'pix' && !pago) { folhaQr({ ...a, cliente_nome: a.cliente_nome }, v, recarregar); recarregar(); }
+        if (forma === 'pix' && !pago && temPix) { folhaQr({ ...a, cliente_nome: a.cliente_nome }, v, recarregar); recarregar(); }
         else { fecharFolha(); aviso('Atendimento concluído'); recarregar(); }
       } catch (e) { f.querySelector('#cmsg').innerHTML = `<div class="aviso erro" role="alert">${esc(e.message)}</div>`; }
     });
@@ -296,18 +653,35 @@ async function config() {
 async function folhaQr(a, valorCentavos, recarregar) {
   const cfg = await seguro(config);
   if (!cfg) return;
+  if (!cfg.pix_chave || !cfg.pix_chave.trim()) {
+    folha(`<h2>Pix de ${moeda(valorCentavos)}</h2><p class="suave">${esc(a.cliente_nome)}</p>
+      <div class="aviso" style="margin:16px 0">Chave Pix não cadastrada nos ajustes.</div>
+      <p class="suave pequeno">Caso não utilize cobrança via Pix com aplicativo, você pode marcar como pago diretamente pelo meio recebido.</p>
+      <div class="acoes">
+        <button class="botao" id="pg">Marcar como pago</button>
+        <button class="botao sec" id="fc">Fechar</button>
+        <button class="botao sec" id="aj">Ir para ajustes</button>
+      </div>`, (f) => {
+      f.querySelector('#aj')?.addEventListener('click', () => { fecharFolha(); ir('ajustes'); });
+      f.querySelector('#fc').addEventListener('click', () => { fecharFolha(); recarregar(); });
+      f.querySelector('#pg')?.addEventListener('click', async () => {
+        if (await seguro(() => api(`/admin/agendamentos/${a.id}`, { metodo: 'PATCH', corpo: { pago: true } }))) { fecharFolha(); aviso('Pagamento registrado'); recarregar(); }
+      });
+    });
+    return;
+  }
   let codigo = '', problema = '';
   try { codigo = gerarBrCode({ tipo: cfg.pix_tipo, chave: cfg.pix_chave, nome: cfg.pix_nome, cidade: cfg.pix_cidade, valorCentavos }); }
   catch (e) { problema = e.message; }
   folha(`<h2>Pix de ${moeda(valorCentavos)}</h2><p class="suave">${esc(a.cliente_nome)}</p>
-    ${problema ? `<div class="aviso erro">${esc(problema)}</div><div class="acoes"><button class="botao" id="aj">Abrir ajustes</button></div>` : `
+    ${problema ? `<div class="aviso erro">${esc(problema)}</div><div class="acoes"><button class="botao" id="pg">Marcar como pago</button><button class="botao sec" id="fc">Fechar</button><button class="botao sec" id="aj">Abrir ajustes</button></div>` : `
       <div class="qr">${qrSvg(codigo)}</div>
-      <p class="suave pequeno" style="text-align:center;margin-top:8px">O cliente aponta a câmera do app do banco. O app não confirma o pagamento sozinho: confira no seu banco.</p>
+      <p class="suave pequeno" style="text-align:center;margin-top:8px">O cliente aponta a câmera do app do banco. O app não confirma o pagamento sozinho: confira com seu banco.</p>
       <div class="codigo">${esc(codigo)}</div>`}
     <div class="acoes">
       ${problema ? '' : '<button class="botao sec" id="cp">Copiar Pix copia e cola</button>'}
       ${problema ? '' : '<button class="botao" id="pg">Recebi, marcar como pago</button>'}
-      <button class="botao sec" id="fc">${problema ? 'Fechar' : 'Fechar sem marcar'}</button>
+      <button class="botao sec" id="fc">Fechar sem marcar</button>
     </div>`, (f) => {
     f.querySelector('#aj')?.addEventListener('click', () => { fecharFolha(); ir('ajustes'); });
     f.querySelector('#cp')?.addEventListener('click', async () => aviso((await copiar(codigo)) ? 'Código copiado' : 'Não deu para copiar', false));
@@ -319,22 +693,41 @@ async function folhaQr(a, valorCentavos, recarregar) {
 }
 
 function folhaDivulgarAgenda() {
-  const link = window.location.origin + '/';
-  const msgWhats = `Olá! ✨ Minha agenda para os próximos dias já está aberta para agendamentos. Garanta seu horário pelo link: ${link} 💅`;
-  folha(`<h2>Divulgar agenda</h2>
-    <p class="suave">Compartilhe o link da sua esmalteria com suas clientes para elas agendarem horários online.</p>
-    <div class="cartao-link" style="margin:16px 0;background:var(--marfim);border:1px solid var(--linha);border-radius:12px;padding:12px 14px">
-      <div class="suave pequeno" style="margin-bottom:4px">Link de agendamento online:</div>
-      <strong style="word-break:break-all;color:var(--ouro-escuro)">${esc(link)}</strong>
+  const linkAgenda = window.location.origin + '/';
+  const linkBio = window.location.origin + '/bio';
+  const msgWhats = `Olá! ✨ A agenda de Jerusa Beauty para os próximos dias já está aberta para agendamentos. Garanta seu horário pelo link: ${linkAgenda} 💅`;
+  const msgBio = `Olá! ✨ Conheça Jerusa Beauty e veja nossos serviços, WhatsApp e agendamento online pelo link oficial: ${linkBio} 💅`;
+  folha(`<h2>Divulgar agenda & Instagram</h2>
+    <p class="suave">Compartilhe os links oficiais de Jerusa Beauty com suas clientes ou divulgue na Bio do Instagram.</p>
+    
+    <div class="cartao-link" style="margin:16px 0 8px;background:var(--marfim);border:1px solid var(--linha);border-radius:12px;padding:12px 14px">
+      <div class="suave pequeno" style="margin-bottom:4px">🌟 <strong>Link da Bio (para o perfil do Instagram):</strong></div>
+      <strong style="word-break:break-all;color:var(--ouro-escuro)">${esc(linkBio)}</strong>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="botao pequecom sec" id="div-copiar-bio">Copiar Bio</button>
+        <a class="botao pequeno" href="${linkWhatsapp('', msgBio)}" target="_blank" rel="noopener">Enviar com WhatsApp</a>
+      </div>
     </div>
+
+    <div class="cartao-link" style="margin:8px 0 16px;background:var(--marfim);border:1px solid var(--linha);border-radius:12px;padding:12px 14px">
+      <div class="suave pequeno" style="margin-bottom:4px">📅 <strong>Link direto de agendamento:</strong></div>
+      <strong style="word-break:break-all;color:var(--ouro-escuro)">${esc(linkAgenda)}</strong>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="botao pequecom sec" id="div-copiar-agenda">Copiar Link</button>
+        <a class="botao pequeno" href="${linkWhatsapp('', msgWhats)}" target="_blank" rel="noopener">Enviar com WhatsApp</a>
+      </div>
+    </div>
+
     <div class="acoes">
-      <button class="botao" id="div-copiar">Copiar link</button>
-      <a class="botao sec" href="${linkWhatsapp('', msgWhats)}" target="_blank" rel="noopener">Compartilhar no WhatsApp</a>
       <button class="botao sec" id="div-fechar">Fechar</button>
     </div>`, (f) => {
-    f.querySelector('#div-copiar').addEventListener('click', async () => {
-      const ok = await copiar(link);
-      aviso(ok ? 'Link copiado!' : 'Não foi possível copiar');
+    f.querySelector('#div-copiar-bio').addEventListener('click', async () => {
+      const ok = await copiar(linkBio);
+      aviso(ok ? 'Link da Bio copiado! Cole na bio do Instagram.' : 'Não foi possível copiar');
+    });
+    f.querySelector('#div-copiar-agenda').addEventListener('click', async () => {
+      const ok = await copiar(linkAgenda);
+      aviso(ok ? 'Link de agendamento copiado!' : 'Não foi possível copiar');
     });
     f.querySelector('#div-fechar').addEventListener('click', fecharFolha);
   });
@@ -347,12 +740,12 @@ function folhaClientesSumidos(sumidos, diasConfig = 15, recarregar = null) {
     
     <div style="display:flex;align-items:center;justify-content:space-between;background:var(--marfim);border:1px solid var(--linha);padding:10px 14px;border-radius:12px;margin:14px 0">
       <div>
-        <label for="cfg-sumidos-dias" class="pequeno negrito" style="display:block">Período de ausência:</label>
-        <span class="pequeno suave">Alertar após quantos dias:</span>
+        <label for="cfg-sumidos-dias" class="pequecom negrito" style="display:block">Período de ausência:</label>
+        <span class="pequecom suave">Alertar após quantos dias:</span>
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <input id="cfg-sumidos-dias" type="number" min="3" max="365" value="${diasConfig}" style="width:65px;min-height:36px;text-align:center;padding:4px 6px;border:1.5px solid var(--linha);border-radius:8px">
-        <span class="pequeno suave">dias</span>
+        <span class="pequecom suave">dias</span>
         <button class="botao sec pequeno" id="btn-salvar-dias-sumidos" style="min-height:36px;padding:0 12px">Salvar</button>
       </div>
     </div>
@@ -363,13 +756,13 @@ function folhaClientesSumidos(sumidos, diasConfig = 15, recarregar = null) {
           ${sumidos.map((c) => {
             const dias = Math.max(0, Math.round((new Date(S.hoje + 'T00:00:00Z') - new Date(c.ultimo_atendimento + 'T00:00:00Z')) / 86400000));
             const primeiroNome = c.nome.split(' ')[0];
-            const msgWhats = `Olá, ${primeiroNome}! Tudo bem? ✨ Sentimos sua falta aqui na Jerusa Beauty! Já faz alguns dias desde o seu último atendimento com a gente. 💕 Que tal reservar um tempinho para cuidar de você e renovar a sua beleza? ✨ Você pode escolher o seu dia e horário pelo link: ${linkAgendamento}`;
+            const msgWhats = `Olá, ${primeiroNome}! Tudo bem? ✨ Sentimos sua falta aqui com ${S.config?.nome_negocio || 'Jerusa Beauty'}! Já faz alguns dias desde o seu último atendimento com a gente. 💕 Que tal reservar um tempinho para cuidar de você e renovar a sua beleza? ✨ Você pode escolher o seu dia e horário pelo link: ${linkAgendamento}`;
             return `
               <div class="item-simples" style="padding:12px 0">
                 <div>
                   <div class="negrito">${esc(c.nome)}</div>
-                  <div class="pequeno suave">Última vez há <strong>${dias} dias</strong> (${dataCurta(c.ultimo_atendimento)})</div>
-                  <div class="pequeno suave" style="font-size:0.75rem">${esc(mascaraWhatsapp(c.whatsapp))}</div>
+                  <div class="pequecom suave">Última vez há <strong>${dias} dias</strong> (${dataCurta(c.ultimo_atendimento)})</div>
+                  <div class="pequecom suave" style="font-size:0.75rem">${esc(mascaraWhatsapp(c.whatsapp))}</div>
                 </div>
                 <a class="botao pequeno" href="${linkWhatsapp(c.whatsapp, msgWhats)}" target="_blank" rel="noopener" style="background:#25d366;border-color:#25d366;color:#fff;display:inline-flex;align-items:center;gap:6px;flex:none" title="Abrir WhatsApp para ${esc(c.nome)}">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm0 18.15c-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.167 8.167 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c.02 4.54-3.68 8.23-8.23 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.7-.81-.23-.08-.39-.12-.56.12-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-1.99-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.17-.25.25-.41.08-.17.04-.31-.02-.43s-.56-1.34-.76-1.84c-.2-.48-.41-.42-.56-.43h-.48c-.17 0-.43.06-.66.31-.22.25-.86.84-.86 2.06 0 1.21.89 2.39 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.53.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.15-1.18-.06-.11-.23-.17-.48-.29z"/></svg>
@@ -381,31 +774,10 @@ function folhaClientesSumidos(sumidos, diasConfig = 15, recarregar = null) {
         </div>
       `}
     </div>
-    <div class="acoes" style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div class="acoes" style="margin-top:16px">
       <button class="botao sec" id="sum-fechar">Fechar</button>
-      ${sumidos.length > 0 ? `<button class="botao pequeno" id="btn-disparar-fidelizacao" style="background:#25d366;border-color:#25d366;color:#fff">Disparar automáticos (até 5)</button>` : ''}
     </div>`, (f) => {
     f.querySelector('#sum-fechar').addEventListener('click', fecharFolha);
-    f.querySelector('#btn-disparar-fidelizacao')?.addEventListener('click', async (e) => {
-      const btn = e.target;
-      if (!confirmar('O sistema enviará a mensagem de fidelização para até 5 clientes ausentes com intervalo seguro entre cada uma. Deseja disparar agora?')) return;
-      btn.disabled = true;
-      btn.textContent = 'Enviando com intervalo seguro...';
-      try {
-        const res = await api('/admin/whatsapp/fidelizacao/processar', { metodo: 'POST', corpo: { forcar: true, limite: 5 } });
-        if (res?.resultado?.enviados > 0) {
-          aviso(`${res.resultado.enviados} mensagem(ns) de fidelização enviada(s) com sucesso!`);
-        } else {
-          aviso('Nenhuma cliente elegível para envio no momento (respeitando intervalo anti-spam).');
-        }
-        fecharFolha();
-        recarregar?.();
-      } catch (err) {
-        aviso(err.message || 'Erro ao processar envio', true);
-        btn.disabled = false;
-        btn.textContent = 'Disparar automáticos (até 5)';
-      }
-    });
     f.querySelector('#btn-salvar-dias-sumidos')?.addEventListener('click', async () => {
       const val = Number(f.querySelector('#cfg-sumidos-dias').value);
       if (!val || val < 3 || val > 365) return aviso('Informe um período entre 3 e 365 dias', true);
@@ -423,14 +795,13 @@ function folhaClientesSumidos(sumidos, diasConfig = 15, recarregar = null) {
 
 // ======================================================================== início
 async function telaInicio() {
-  api('/admin/whatsapp/lembretes/processar', { metodo: 'POST' }).catch(() => {});
   const [p, anivDados] = await Promise.all([
     seguro(() => api('/admin/painel')),
     seguro(() => api('/admin/aniversariantes/hoje')).catch(() => null),
   ]);
   if (!p) return;
-  S.hoje = p.hoje;
   const aniversariantesHoje = anivDados?.aniversariantes || [];
+  S.hoje = p.hoje;
   const abertos = p.agendamentos_hoje.filter((a) => a.status === 'agendado');
   const concluidosHoje = p.agendamentos_hoje.filter((a) => a.status === 'concluido');
   const vencidosHoje = p.agendamentos_hoje.filter(
@@ -443,26 +814,34 @@ async function telaInicio() {
   const todosAtendimentos = [...p.agendamentos_hoje, ...(p.agendamentos_proximo_dia || [])];
   const diasSumido = p.alerta_sumidos_dias || 15;
 
-  const dispensadosIds = getCancelamentosDispensados();
-  const canceladosValidos = (p.cancelados_recentes || [])
-    .filter((c) => !dispensadosIds.includes(c.id) && !c.cancelamento_dispensado);
-  const canceladosExibir = canceladosValidos.slice(0, 5);
-
   let alertasQtd = 0;
   if (vencidosHoje.length > 0) alertasQtd++;
   if (p.a_receber_qtd > 0) alertasQtd++;
   if (p.proximos_7_dias <= 3) alertasQtd++;
   if (p.sumidos.length > 0) alertasQtd++;
-  if (canceladosExibir.length > 0) alertasQtd++;
+
+  const canceladosDispensados = getCancelamentosDispensados();
+  const canceladosVisiveis = (p.cancelados_recentes || [])
+    .filter((c) => !canceladosDispensados.includes(String(c.id)) && !c.cancelamento_dispensado)
+    .slice(0, 5);
+  if (canceladosVisiveis.length > 0) alertasQtd++;
 
   const oculto = !!S.ocultarValores;
 
   conteudo().innerHTML = `
     <header class="cabeca">
       <div><h1 class="assinatura">${saudacao()}</h1><p>${esc(dataLonga(p.hoje))}</p></div>
-      <button class="icone-btn" id="btn-olho" type="button" aria-label="${oculto ? 'Mostrar valores' : 'Ocultar valores'}" title="${oculto ? 'Mostrar valores' : 'Ocultar valores'}">
-        ${icone(oculto ? 'olhoFechado' : 'olho')}
-      </button>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${(S.licenca && !S.licenca.isento_mensalidade) ? `
+          <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-inicio" type="button" title="Ver faturas e pagar com Pix">
+            <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
+            <span>Mensalidade</span>
+          </button>
+        ` : ''}
+        <button class="icone-btn" id="btn-olho" type="button" aria-label="${oculto ? 'Mostrar valores' : 'Ocultar valores'}" title="${oculto ? 'Mostrar valores' : 'Ocultar valores'}">
+          ${icone(oculto ? 'olhoFechado' : 'olho')}
+        </button>
+      </div>
     </header>
 
     ${aniversariantesHoje.length > 0 ? `
@@ -470,7 +849,7 @@ async function telaInicio() {
         <span style="font-size:26px;line-height:1">🎂</span>
         <div style="flex:1">
           <div style="font-weight:600;font-size:15px;color:var(--tinta)">Aniversariantes de Hoje (${aniversariantesHoje.length})</div>
-          <div class="suave pequeno" style="margin-top:2px">${aniversariantesHoje.map((a) => esc(a.nome.split(' ')[0])).join(', ')} · Parabéns automático enviado via WhatsApp ✨</div>
+          <div class="suave pequeno" style="margin-top:2px">${aniversariantesHoje.map((a) => esc(a.nome.split(' ')[0])).join(', ')} — Parabéns automático enviado via WhatsApp ✨</div>
         </div>
       </div>
     ` : ''}
@@ -494,7 +873,7 @@ async function telaInicio() {
       <div class="card-kpi">
         <span class="card-kpi-rotulo">Hoje (Previsão)</span>
         <strong class="card-kpi-valor" data-kpi-valor="${moeda(p.faturado_hoje_centavos + p.previsto_hoje_centavos)}">${oculto ? '***' : moeda(p.faturado_hoje_centavos + p.previsto_hoje_centavos)}</strong>
-        <span class="card-kpi-sub">${p.agendamentos_hoje.length} no dia · ${abertos.length} a atender</span>
+        <span class="card-kpi-sub">${p.agendamentos_hoje.length} com dia · ${abertos.length} a atender</span>
       </div>
     </div>
 
@@ -503,6 +882,36 @@ async function telaInicio() {
         <h2>Central de Decisão & Alertas</h2>
         <span class="selo-texto ${alertasQtd > 0 ? 'pend' : 'ok'}">${alertasQtd} ação${alertasQtd === 1 ? '' : 'ões'} pendente${alertasQtd === 1 ? '' : 's'}</span>
       </div>
+
+      ${canceladosVisiveis.length > 0 ? `
+      <div class="card-alerta alerta-cancelamentos" style="border-left: 4px solid var(--cor-perigo, #e11d48); background: var(--cor-fundo-suave, #fff1f2); padding: 14px 16px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px;">
+          <div>
+            <strong style="color: var(--cor-perigo, #e11d48); font-size: 1rem; display: flex; align-items:center; gap: 6px;">
+              <span>⚠️</span> Cancelamentos Recentes (${canceladosVisiveis.length})
+            </strong>
+            <p class="pequecom suave" style="margin: 2px 0 0 0;">Clientes que cancelaram horário recentemente. Horário liberado na agenda.</p>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap: 8px; margin-top: 10px;">
+          ${canceladosVisiveis.map((c) => `
+            <div class="item-cancelado-alerta" data-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #fecdd3; gap:10px; flex-wrap:wrap;">
+              <div>
+                <strong style="font-size:0.9rem">${esc(c.cliente_nome)}</strong>
+                <div class="pequecom suave">${dataCurta(c.data)} às ${hora(c.inicio_min)} (${c.local === 'espaco' ? 'Espaço' : 'Domicílio'})</div>
+              </div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                ${c.cliente_whatsapp ? `<a class="botao sec pequecom btn-zap-cancelado" data-id="${c.id}" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar com Zap</a>` : ''}
+                <button class="botao sec pequecom btn-fechar-cancelado" data-id="${c.id}" type="button" title="Dispensar aviso" style="font-size:.75rem;padding:3px 8px;color:#888;">Fechar</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="margin-top:10px; text-align:right;">
+          <button class="botao sec pequecom btn-fechar-todos-cancelados" type="button" style="font-size:0.75rem; padding: 2px 8px; opacity:0.8;">Dispensar todos</button>
+        </div>
+      </div>
+      ` : ''}
 
       ${vencidosHoje.length > 0 ? `
       <div class="card-alerta alerta-vencidos">
@@ -526,37 +935,6 @@ async function telaInicio() {
           <div class="card-alerta-texto">${moeda(p.a_receber_total_centavos)} a receber em <strong>${p.a_receber_qtd} atendimento(s)</strong> concluído(s).</div>
         </div>
         <button class="botao sec pequeno" id="acao-cobrar">Cobrar</button>
-      </div>` : ''}
-
-      ${(canceladosExibir.length > 0) ? `
-      <div class="card-alerta alerta-cancelamentos" id="card-alerta-cancelamentos" style="border-left:4px solid #ef4444;background:#fff5f5">
-        <div class="card-alerta-conteudo">
-          <div class="card-alerta-titulo" style="color:#b91c1c;display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;align-items:center;gap:6px">
-              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              <span id="titulo-cancelados-qtd">Cancelamentos recentes (${canceladosExibir.length})</span>
-            </div>
-            ${canceladosExibir.length > 1 ? `<button type="button" class="link btn-fechar-todos-cancelados" style="font-size:.75rem;color:#b91c1c;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0">Dispensar todos</button>` : ''}
-          </div>
-          <div class="card-alerta-texto" style="color:#7f1d1d">
-            <strong id="subtitulo-cancelados-qtd">${canceladosExibir.length} horário(s) desmarcado(s)</strong> recentemente na sua agenda.
-            <div id="lista-cancelados-painel" style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-              ${canceladosExibir.map((c) => `
-                <div class="linha-cancelado-item" data-id="${c.id}" style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-top:1px solid #fee2e2;gap:8px">
-                  <div style="min-width:0;flex:1">
-                    <span style="font-size:.85rem;display:block"><strong>${esc(c.cliente_nome)}</strong> · ${dataCurta(c.data)} às ${hora(c.inicio_min)}</span>
-                    <span style="font-size:.75rem;color:#991b1b;display:block">${esc((c.servicos || []).map((s) => s.nome).join(', ') || 'Atendimento')}</span>
-                  </div>
-                  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-                    ${c.cliente_whatsapp ? `<a class="botao sec pequeno btn-zap-cancelado" data-id="${c.id}" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar no Zap</a>` : ''}
-                    <button type="button" class="botao sec pequeno btn-fechar-cancelado" data-id="${c.id}" style="font-size:.75rem;padding:3px 8px;border-color:#fca5a5;color:#b91c1c;background:#fff">Fechar</button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-        <button class="botao sec pequeno" id="acao-ver-cancelados" style="border-color:#fca5a5;color:#b91c1c">Ver Agenda</button>
       </div>` : ''}
 
       <div class="card-alerta alerta-ocupacao">
@@ -642,54 +1020,76 @@ async function telaInicio() {
     });
   }
   conteudo().querySelector('#ver-grade')?.addEventListener('click', () => ir('agenda'));
-  conteudo().querySelector('#acao-ver-cancelados')?.addEventListener('click', () => ir('agenda'));
-
-  function dispensarCancelamentoItem(id) {
-    dispensarCancelamentoLocal(id);
-    api('/admin/agendamentos/' + id + '/dispensar-cancelamento', { method: 'POST' }).catch(() => {});
-    const itemEl = conteudo().querySelector(`.linha-cancelado-item[data-id="${id}"]`);
-    if (itemEl) itemEl.remove();
-
-    const restantes = conteudo().querySelectorAll('.linha-cancelado-item');
-    if (restantes.length === 0) {
-      conteudo().querySelector('#card-alerta-cancelamentos')?.remove();
-    } else {
-      const tit = conteudo().querySelector('#titulo-cancelados-qtd');
-      if (tit) tit.textContent = `Cancelamentos recentes (${restantes.length})`;
-      const sub = conteudo().querySelector('#subtitulo-cancelados-qtd');
-      if (sub) sub.textContent = `${restantes.length} horário(s) desmarcado(s)`;
-    }
-  }
-
-  conteudo().querySelectorAll('.btn-zap-cancelado').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = Number(btn.dataset.id);
-      if (id) dispensarCancelamentoItem(id);
-    });
-  });
-
-  conteudo().querySelectorAll('.btn-fechar-cancelado').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const id = Number(btn.dataset.id);
-      if (id) dispensarCancelamentoItem(id);
-    });
-  });
-
-  conteudo().querySelector('.btn-fechar-todos-cancelados')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    const ids = Array.from(conteudo().querySelectorAll('.linha-cancelado-item')).map((el) => Number(el.dataset.id)).filter(Boolean);
-    ids.forEach((id) => dispensarCancelamentoLocal(id));
-    api('/admin/agendamentos/dispensar-cancelamentos', {
-      method: 'POST',
-      body: JSON.stringify({ ids }),
-    }).catch(() => {});
-    conteudo().querySelector('#card-alerta-cancelamentos')?.remove();
-  });
   conteudo().querySelector('#acao-vencidos')?.addEventListener('click', () => { S.dia = S.hoje; ir('agenda'); });
   conteudo().querySelector('#acao-cobrar')?.addEventListener('click', () => ir('financeiro'));
   conteudo().querySelector('#acao-divulgar')?.addEventListener('click', folhaDivulgarAgenda);
   conteudo().querySelector('#acao-sumidos')?.addEventListener('click', () => folhaClientesSumidos(p.sumidos, diasSumido, telaInicio));
+  conteudo().querySelector('#btn-mensalidade-inicio')?.addEventListener('click', () => folhaMensalidades());
+
+  conteudo().querySelectorAll('.btn-zap-cancelado').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      if (!id) return;
+      dispensarCancelamentoLocal(id);
+      const item = btn.closest('.item-cancelado-alerta');
+      if (item) {
+        item.style.transition = 'all 0.25s ease';
+        item.style.opacity = '0';
+        setTimeout(() => {
+          item.remove();
+          const card = document.querySelector('.card-alerta.alerta-cancelamentos');
+          if (card && !card.querySelector('.item-cancelado-alerta')) {
+            card.remove();
+          }
+        }, 250);
+      }
+      api(`/admin/agendamentos/${id}/dispensar-cancelamento`, { metodo: 'POST', corpo: {} }).catch(() => {});
+    });
+  });
+
+  conteudo().querySelectorAll('.btn-fechar-cancelado').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!id) return;
+      dispensarCancelamentoLocal(id);
+      const item = btn.closest('.item-cancelado-alerta');
+      if (item) {
+        item.style.transition = 'all 0.25s ease';
+        item.style.opacity = '0';
+        setTimeout(() => {
+          item.remove();
+          const card = document.querySelector('.card-alerta.alerta-cancelamentos');
+          if (card && !card.querySelector('.item-cancelado-alerta')) {
+            card.remove();
+          }
+        }, 250);
+      }
+      try {
+        await api(`/admin/agendamentos/${id}/dispensar-cancelamento`, { metodo: 'POST', corpo: {} });
+      } catch (e) {
+        console.warn('Erro ao dispensar cancelamento com servidor:', e);
+      }
+    });
+  });
+
+  conteudo().querySelector('.btn-fechar-todos-cancelados')?.addEventListener('click', async () => {
+    const card = document.querySelector('.card-alerta.alerta-cancelamentos');
+    const items = card ? card.querySelectorAll('.item-cancelado-alerta') : [];
+    const ids = Array.from(items).map((el) => el.dataset.id).filter(Boolean);
+    ids.forEach((id) => dispensarCancelamentoLocal(id));
+    if (card) {
+      card.style.transition = 'all 0.25s ease';
+      card.style.opacity = '0';
+      setTimeout(() => card.remove(), 250);
+    }
+    if (ids.length > 0) {
+      try {
+        await api('/admin/agendamentos/dispensar-cancelamentos', { metodo: 'POST', corpo: { ids } });
+      } catch (e) {
+        console.warn('Erro ao dispensar cancelamentos com servidor:', e);
+      }
+    }
+  });
 }
 
 // ======================================================================== agenda
@@ -705,13 +1105,22 @@ async function telaAgenda() {
   const agendados = lista.filter((a) => a.status === 'agendado');
   const concluidos = lista.filter((a) => a.status === 'concluido');
   const outros = lista.filter((a) => a.status === 'cancelado' || a.status === 'faltou');
+  const canceladosHoje = (lista || []).filter((a) => a.status === 'cancelado');
   const totalConcluido = concluidos.reduce((s, a) => s + valorDe(a), 0);
   const totalAgendado = agendados.reduce((s, a) => s + valorDe(a), 0);
   const agoraMin = dia === S.hoje ? new Date(Date.now() - 3 * 3600000).getUTCHours() * 60 + new Date(Date.now() - 3 * 3600000).getUTCMinutes() : null;
   const vencidos = dia === S.hoje && agoraMin != null ? agendados.filter((a) => agoraMin >= a.inicio_min + a.duracao_min) : [];
 
   conteudo().innerHTML = `
-    <header class="cabeca"><div><h1 class="assinatura">Agenda</h1><p>${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''} · ${agendados.length} a atender · ${concluidos.length} já atendido(s)</p></div></header>
+    <header class="cabeca">
+      <div><h1 class="assinatura">Agenda</h1><p>${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''} · ${agendados.length} a atender · ${concluidos.length} já atendido(s)</p></div>
+      ${(S.licenca && !S.licenca.isento_mensalidade) ? `
+        <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
+          <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
+          <span>Mensalidade</span>
+        </button>
+      ` : ''}
+    </header>
     <div class="nav-data">
       <button class="icone-btn" id="ant" aria-label="Dia anterior">${icone('esq')}</button>
       <label class="data-atual" style="display:grid;place-items:center;position:relative"><span>${esc(dataLonga(dia))}</span>
@@ -719,21 +1128,16 @@ async function telaAgenda() {
       <button class="icone-btn" id="prox" aria-label="Próximo dia">${icone('dir')}</button>
     </div>
     ${dia !== S.hoje ? '<p style="text-align:center;margin-top:10px"><button class="link" id="hojeb">Voltar para hoje</button></p>' : ''}
-    ${bloqueios.map((b) => `<div class="aviso">Bloqueado${b.inicio_min === 0 && b.fim_min === 1440 ? ' o dia todo' : `: ${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ` · ${esc(b.motivo)}` : ''}</div>`).join('')}
-
-    ${outros.length > 0 ? `
-    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div>
-        <strong style="color:#991b1b;display:flex;align-items:center;gap:6px">
-          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
-          ${outros.length} cancelamento(s) / falta(s) neste dia
-        </strong>
-        <p class="pequeno" style="margin:2px 0 0;color:#7f1d1d">
-          ${outros.map(c => `<b>${esc(c.cliente_nome)}</b> (${hora(c.inicio_min)})`).join(', ')} — horário(s) livre(s) para novo agendamento ou encaixe.
-        </p>
+    ${canceladosHoje.length > 0 ? `
+      <div class="aviso-cancelados" style="background:#fff1f2;border:1px solid #fecdd3;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <strong style="color:#e11d48;font-size:0.9rem">⚠️ ${canceladosHoje.length} atendimento(s) cancelado(s) nesta data</strong>
+          <div class="pequecom suave">${canceladosHoje.map((c) => esc(c.cliente_nome) + ' (' + hora(c.inicio_min) + ')').join(', ')}</div>
+        </div>
+        <button class="botao sec pequeno" id="atalho-ver-cancelados" type="button" style="font-size:0.75rem">Ver detalhes</button>
       </div>
-      <button class="botao sec pequeno" id="btn-abrir-cancelados" type="button" style="color:#991b1b;border-color:#fca5a5">Ver cancelados</button>
-    </div>` : ''}
+    ` : ''}
+    ${bloqueios.map((b) => `<div class="aviso">Bloqueado${b.inicio_min === 0 && b.fim_min === 1440 ? ' o dia todo' : `: ${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ` · ${esc(b.motivo)}` : ''}</div>`).join('')}
 
     ${lista.length > 0 ? `
     <div class="segmentos-filtro" id="filtro-agenda">
@@ -788,13 +1192,6 @@ async function telaAgenda() {
   c.querySelector('#hojeb')?.addEventListener('click', () => { S.dia = S.hoje; telaAgenda(); });
   c.querySelector('#pular').addEventListener('change', (e) => { if (e.target.value) { S.dia = e.target.value; telaAgenda(); } });
   c.querySelector('#novo').addEventListener('click', () => folhaNovo(dia, telaAgenda));
-  c.querySelector('#btn-abrir-cancelados')?.addEventListener('click', () => {
-    const det = c.querySelector('#secao-outros');
-    if (det) {
-      det.open = true;
-      det.scrollIntoView({ behavior: 'smooth' });
-    }
-  });
   c.querySelector('#bloquear').addEventListener('click', () => folhaBloquear(dia, telaAgenda));
 
   c.querySelectorAll('#filtro-agenda .filtro-btn').forEach((btn) => {
@@ -811,6 +1208,11 @@ async function telaAgenda() {
   });
 
   ligarAtendimentos(lista, telaAgenda);
+  conteudo().querySelector('#btn-mensalidade-agenda')?.addEventListener('click', () => folhaMensalidades());
+  conteudo().querySelector('#atalho-ver-cancelados')?.addEventListener('click', () => {
+    const btnOutros = conteudo().querySelector('#filtro-agenda [data-filtro="outros"]');
+    if (btnOutros) btnOutros.click();
+  });
 }
 
 function folhaBloquear(dia, recarregar) {
@@ -1130,8 +1532,8 @@ async function telaFinanceiro() {
       ${variacao != null ? `<div class="linha-valor"><span>Comparado ao mês anterior</span><span>${variacao >= 0 ? '+' : ''}${variacao}%</span></div>` : ''}
     </div>
     <section class="secao">
-      <h2>Formas de pagamento no mês</h2>
-      <p class="sub-texto">Total recebido e a receber no mês por forma de pagamento.</p>
+      <h2>Formas de pagamento com mês</h2>
+      <p class="sub-texto">Total recebido e a receber com mês por forma de pagamento.</p>
       <div class="grid-formas" style="margin-top:12px">
         <div class="card-forma ${f.por_forma?.pix?.recebido_centavos > 0 ? 'destaque' : ''}">
           <span class="card-forma-titulo">⚡ Pix</span>
@@ -1154,10 +1556,10 @@ async function telaFinanceiro() {
       ${f.por_servico.map((s) => `<div style="margin-top:14px"><div class="linha-valor" style="border:0;padding:0"><span>${esc(s.nome)} <span class="suave pequeno">× ${s.qtd}</span></span><span class="negrito">${moeda(s.total)}</span></div>
         <div class="barra-servico"><i style="width:${Math.round((s.total / maior) * 100)}%"></i></div></div>`).join('') || '<p class="vazio">Nenhum atendimento concluído neste mês.</p>'}</section>
     <section class="secao"><h2>A receber</h2>
-      ${f.a_receber_lista.map((a) => `<div class="item-simples"><div><div class="negrito">${esc(a.cliente_nome)}</div><div class="pequeno suave">${dataCurta(a.data)} · ${moeda(a.valor_centavos)}</div></div>
+      ${f.a_receber_lista.map((a) => `<div class="item-simples"><div><div class="negrito">${esc(a.cliente_nome)}</div><div class="pequecom suave">${dataCurta(a.data)} · ${moeda(a.valor_centavos)}</div></div>
         <div style="display:flex;gap:8px"><button class="botao sec pequeno" data-qr="${a.id}">Pix</button><button class="botao pequeno" data-pago="${a.id}">Recebi</button></div></div>`).join('') || '<p class="vazio">Nada pendente.</p>'}</section>
     <section class="secao"><h2>Despesas</h2><p class="sub-texto">Material, transporte, taxas…</p>
-      ${d.despesas.map((x) => `<div class="item-simples"><div><div>${esc(x.descricao)}</div><div class="pequeno suave">${dataCurta(x.data)}${x.categoria ? ` · ${esc(x.categoria)}` : ''}</div></div>
+      ${d.despesas.map((x) => `<div class="item-simples"><div><div>${esc(x.descricao)}</div><div class="pequecom suave">${dataCurta(x.data)}${x.categoria ? ` · ${esc(x.categoria)}` : ''}</div></div>
         <div style="display:flex;gap:10px;align-items:center"><span class="negrito">${moeda(x.valor_centavos)}</span><button class="link perigo" data-del="${x.id}" aria-label="Remover ${esc(x.descricao)}">Remover</button></div></div>`).join('')}
       <div class="acoes"><button class="botao sec" id="novad">Adicionar despesa</button></div></section>`;
   const c = conteudo();
@@ -1246,7 +1648,7 @@ function folhaServico(s) {
     f.querySelector('#sdel')?.addEventListener('click', async () => {
       const ok = await confirmar({
         titulo: 'Excluir serviço?',
-        mensagem: 'Os atendimentos antigos continuarão no histórico. Para apenas esconder das clientes, desligue a opção "Mostrar para os clientes".',
+        mensagem: 'Os atendimentos antigos continuarão com histórico. Para apenas esconder das clientes, desligue a opção "Mostrar para os clientes".',
         textoOk: 'Sim, excluir serviço',
         textoCancelar: 'Voltar',
         perigo: true,
@@ -1263,34 +1665,49 @@ async function telaAjustes() {
   if (!r) return;
   const cfg = r.config; S.config = cfg;
   const link = `${location.origin}/`;
+  const linkBio = `${location.origin}/bio`;
   conteudo().innerHTML = `
     <header class="cabeca"><div><h1 class="assinatura">Ajustes</h1></div></header>
 
-    <section class="secao" style="margin-top:12px"><h2>Link para os clientes</h2><p class="sub-texto">Envie para quem quiser marcar horário. Coloque também no Instagram.</p>
-      <div class="cartao-link">${esc(link)}</div>
-      <div class="acoes duas"><button class="botao sec" id="copiar">Copiar link</button>
-        <a class="botao" href="${linkWhatsapp('', '')}" id="compartilhar">Enviar no WhatsApp</a></div></section>
+    <section class="secao" style="margin-top:12px"><h2>Links Oficiais de Divulgação</h2><p class="sub-texto">Envie para clientes ou coloque na Bio do Instagram de Jerusa Beauty.</p>
+      <div class="cartao-link" style="margin-top:12px">
+        <div class="suave pequeno" style="margin-bottom:2px">🌟 <strong>Link da Bio (ideal para colocar com Instagram):</strong></div>
+        <strong style="color:var(--ouro-escuro);word-break:break-all">${esc(linkBio)}</strong>
+      </div>
+      <div class="acoes duas" style="margin-top:8px">
+        <button class="botao sec pequeno" id="copiar-bio">Copiar link da Bio</button>
+        <a class="botao pequeno" href="${linkWhatsapp('', `Olá! ✨ Conheça Jerusa Beauty e agende seu horário pelo link: ${linkBio}`)}" target="_blank" rel="noopener">Enviar com WhatsApp</a>
+      </div>
+
+      <div class="cartao-link" style="margin-top:16px">
+        <div class="suave pequeno" style="margin-bottom:2px">📅 <strong>Link direto de agendamento online:</strong></div>
+        <strong style="color:var(--ouro-escuro);word-break:break-all">${esc(link)}</strong>
+      </div>
+      <div class="acoes duas" style="margin-top:8px">
+        <button class="botao sec pequeno" id="copiar">Copiar agendamento</button>
+        <a class="botao pequeno" href="${linkWhatsapp('', `Olá! ✨ Agende seu horário com Jerusa Beauty pelo link: ${link}`)}" target="_blank" rel="noopener">Enviar com WhatsApp</a>
+      </div></section>
 
     <section class="secao"><h2>Seu negócio</h2>
       <div class="campo"><label for="c-nome">Nome</label><input id="c-nome" maxlength="80" value="${esc(cfg.nome_negocio)}"></div>
-      <div class="campo"><label for="c-whats">Seu WhatsApp</label><input id="c-whats" type="tel" inputmode="tel" value="${esc(mascaraWhatsapp(cfg.whatsapp))}" placeholder="(83) 99999-0000"><span class="dica">O cliente usa este número para avisar que marcou e para falar com você.</span></div>
-      <label class="interruptor"><span>Atendo no meu espaço</span><input type="checkbox" id="c-esp" ${cfg.atende_espaco ? 'checked' : ''}><span class="trilho"></span></label>
+      <div class="campo"><label for="c-whats">Seu WhatsApp</label><input id="c-whats" type="tel" inputmode="tel" value="${esc(mascaraWhatsapp(cfg.whatsapp))}" placeholder="(83) 98625-0499"><span class="dica">O cliente usa este número para avisar que marcou e para falar com você.</span></div>
+      <label class="interruptor"><span>Atendo com meu espaço</span><input type="checkbox" id="c-esp" ${cfg.atende_espaco ? 'checked' : ''}><span class="trilho"></span></label>
       <div class="campo" id="c-end-w"><label for="c-end">Endereço do espaço</label><input id="c-end" maxlength="200" value="${esc(cfg.endereco_espaco)}"></div>
       <label class="interruptor"><span>Atendo a domicílio</span><input type="checkbox" id="c-dom" ${cfg.atende_domicilio ? 'checked' : ''}><span class="trilho"></span></label>
-      <p class="dica suave pequeno" style="margin-top:4px">Deixe desmarcado para atender exclusivamente no seu espaço.</p>
+      <p class="dica suave pequeno" style="margin-top:4px">Deixe desmarcado para atender exclusivamente com seu espaço.</p>
       <div class="acoes" style="margin-top:14px">
         <button class="botao" id="salvar-negocio" type="button">Salvar ajustes</button>
       </div></section>
 
     <section class="secao"><h2>Agenda</h2><p class="sub-texto">Regras para os horários que o cliente enxerga.</p>
       <div class="grade2">
-        <div class="campo"><label for="c-resp">Respiro no espaço (min)</label><input id="c-resp" type="number" inputmode="numeric" min="0" value="${cfg.respiro_min}"></div>
+        <div class="campo"><label for="c-resp">Respiro com espaço (min)</label><input id="c-resp" type="number" inputmode="numeric" min="0" value="${cfg.respiro_min}"></div>
         <div class="campo"><label for="c-desl">Deslocamento (min)</label><input id="c-desl" type="number" inputmode="numeric" min="0" value="${cfg.deslocamento_min}"></div>
         <div class="campo"><label for="c-ant">Antecedência mínima (min)</label><input id="c-ant" type="number" inputmode="numeric" min="0" value="${cfg.antecedencia_min}"></div>
         <div class="campo"><label for="c-jan">Marcar até (dias à frente)</label><input id="c-jan" type="number" inputmode="numeric" min="1" max="365" value="${cfg.janela_dias}"></div>
         <div class="campo"><label for="c-passo">Horários a cada (min)</label><input id="c-passo" type="number" inputmode="numeric" min="5" step="5" value="${cfg.passo_min}"></div>
         <div class="campo"><label for="c-canc">Cancelar até (horas antes)</label><input id="c-canc" type="number" inputmode="numeric" min="0" value="${cfg.cancelar_horas}"></div></div>
-      <p class="dica suave pequeno" style="margin-top:8px">Respiro vale entre atendimentos no espaço; deslocamento vale quando um dos dois é a domicílio. Os dois nunca se somam.</p>
+      <p class="dica suave pequeno" style="margin-top:8px">Respiro vale entre atendimentos com espaço; deslocamento vale quando um dos dois é a domicílio. Os dois nunca se somam.</p>
       <label class="interruptor" style="margin-top:8px"><span>Encaixar logo após o atendimento anterior<br><span class="suave pequeno">Evita buracos na agenda (ex.: 09:25 em vez de 09:30)</span></span><input type="checkbox" id="c-col" ${cfg.encaixar_colado ? 'checked' : ''}><span class="trilho"></span></label></section>
 
     <section class="secao"><h2>Fidelização de clientes</h2><p class="sub-texto">Acompanhe clientes ausentes para enviar mensagem de retorno.</p>
@@ -1299,15 +1716,15 @@ async function telaAjustes() {
         <span class="dica">Padrão: 15 dias. O painel e a lista de fidelização alertarão clientes cujo último atendimento ultrapassou esse período sem novo agendamento.</span></div></section>
 
     <section class="secao"><h2>Pix <span class="suave pequeno" style="font-weight:400">(Opcional)</span></h2>
-      <p class="sub-texto">Usado para gerar o QR Code ao concluir um atendimento. <strong>Se você não usa Pix no aplicativo, pode deixar em branco — os ajustes serão salvos normalmente.</strong></p><p class="sub-texto">Usado para gerar o QR Code ao concluir um atendimento.</p>
+      <p class="sub-texto">Usado para gerar o QR Code ao concluir um atendimento. <strong>Se você não usa Pix com aplicativo, pode deixar em branco — os ajustes serão salvos normalmente.</strong></p>
       <div class="campo"><span class="rotulo">Tipo da chave</span><div class="segmentos" id="c-tipo" style="grid-auto-flow:row;grid-template-columns:repeat(3,1fr)">${[['telefone', 'Telefone'], ['cpf', 'CPF'], ['cnpj', 'CNPJ'], ['email', 'E-mail'], ['aleatoria', 'Aleatória']].map(([k, t]) => `<button type="button" data-t="${k}" aria-pressed="${cfg.pix_tipo === k}">${t}</button>`).join('')}</div></div>
-      <div class="campo"><label for="c-chave">Chave Pix</label><input id="c-chave" maxlength="80" value="${esc(cfg.pix_chave)}" autocomplete="off"></div>
-      <div class="campo"><label for="c-pnome">Nome que aparece para quem paga</label><input id="c-pnome" maxlength="25" value="${esc(cfg.pix_nome)}" placeholder="Como está no banco (até 25 letras)"></div>
-      <div class="campo"><label for="c-pcid">Cidade</label><input id="c-pcid" maxlength="15" value="${esc(cfg.pix_cidade)}" placeholder="Campina Grande"></div></section>
+      <div class="campo"><label for="c-chave">Chave Pix</label><input id="c-chave" maxlength="80" value="${esc(cfg.pix_chave)}" autocomplete="off" placeholder="Opcional — deixe vazio se não usar"></div>
+      <div class="campo"><label for="c-pnome">Nome que aparece para quem paga</label><input id="c-pnome" maxlength="25" value="${esc(cfg.pix_nome)}" placeholder="Como está com banco (opcional)"></div>
+      <div class="campo"><label for="c-pcid">Cidade</label><input id="c-pcid" maxlength="15" value="${esc(cfg.pix_cidade)}" placeholder="Cidade (opcional)"></div></section>
 
     <section class="secao" id="secao-push">
-      <h2>Notificações no Celular (Web Push)</h2>
-      <p class="sub-texto">Receba alertas sonoros no celular assim que uma cliente agendar ou desmarcar um horário pelo site.</p>
+      <h2>Notificações com Celular (Web Push)</h2>
+      <p class="sub-texto">Receba alertas sonoros com celular assim que uma cliente agendar ou desmarcar um horário pelo site.</p>
       <div id="push-conteudo" style="margin-top:14px">
         <div class="suave pequeno" style="padding:12px 0">Verificando suporte a notificações...</div>
       </div>
@@ -1337,20 +1754,53 @@ async function telaAjustes() {
       <div class="acoes"><button class="botao" id="salvar-exp">Salvar expediente</button></div></section>
 
     <section class="secao"><h2>Folgas e bloqueios</h2><p class="sub-texto">Datas ou horários em que o cliente não pode marcar.</p>
-      ${r.bloqueios.map((b) => `<div class="item-simples"><div><div>${esc(dataLonga(b.data))}</div><div class="pequeno suave">${b.inicio_min === 0 && b.fim_min === 1440 ? 'Dia inteiro' : `${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ' · ' + esc(b.motivo) : ''}</div></div>
+      ${r.bloqueios.map((b) => `<div class="item-simples"><div><div>${esc(dataLonga(b.data))}</div><div class="pequecom suave">${b.inicio_min === 0 && b.fim_min === 1440 ? 'Dia inteiro' : `${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ' · ' + esc(b.motivo) : ''}</div></div>
         <button class="link perigo" data-bdel="${b.id}">Remover</button></div>`).join('') || '<p class="vazio">Nenhum bloqueio futuro.</p>'}
       <div class="acoes"><button class="botao sec" id="novo-bloq">Bloquear data ou horário</button></div></section>
 
+    ${(S.licenca && S.licenca.tipo_placom === 'mensalidade') ? `
+    <section class="secao"><h2>Mensalidade do Aplicativo</h2>
+      <p class="sub-texto">Acompanhe suas mensalidades e pague com Pix direto para a Central.</p>
+      <div class="cartao" style="background:var(--marfim);border:1px solid var(--linha);padding:14px;border-radius:12px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:600">Placom Mensal Recorrente</span>
+          <span class="selo-texto ${S.licenca.aviso_atraso ? 'pend' : 'ok'}">${S.licenca.aviso_atraso ? '⚠️ Pendente' : '✓ Em dia'}</span>
+        </div>
+        <div class="suave pequeno">
+          Valor: <strong>${moeda(S.licenca.valor_mensalidade_centavos || 3999)}/mês</strong> · Vencimento: todo dia <strong>${S.licenca.dia_vencimento || (S.licenca.vencimento ? parseInt(S.licenca.vencimento.split('-')[2], 10) : 10)}</strong>
+        </div>
+        ${S.licenca.vencimento ? `
+        <div class="suave pequeno" style="margin-top:4px">
+          Ciclo atual: <strong>${S.licenca.vencimento.split('-').reverse().join('/')}</strong> (${S.licenca.status === 'ativo' ? 'Regular' : 'Aguardando Pagamento'})
+        </div>` : ''}
+      </div>
+      <div class="acoes">
+        <button class="botao" id="btn-ajustes-mensalidades" type="button">Ver Faturas & Pagar com Pix</button>
+      </div>
+    </section>` : ''}
+
+    ${(S.licenca?.tipo_placom === 'demonstracao' || S.demoInfo) ? `
+    <section class="secao"><h2>Modo Demonstração</h2>
+      <p class="sub-texto">Você está experimentando o app de Jerusa Beauty em tempo real.</p>
+      <div class="cartao" style="background:var(--marfim);border:1px solid var(--linha);padding:14px;border-radius:12px;margin-bottom:12px">
+        <div style="font-weight:600;margin-bottom:4px">Gostando da praticidade?</div>
+        <div class="suave pequeno">Ative a sua licença definitiva para manter todos os seus dados, cadastrar clientes e colocar o link com seu Instagram.</div>
+      </div>
+      <div class="acoes">
+        <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Estou testando a demonstração de Jerusa Beauty e decidi adquirir o app definitivo!')}" target="_blank" rel="noopener noreferrer" class="botao" style="text-decoration:none">Quero Ativar Minha Licença</a>
+      </div>
+    </section>` : ''}
+
     <section class="secao"><h2>Segurança</h2>
-      <div class="acoes"><button class="botao sec" id="trocar">Trocar senha</button><button class="botao sec" id="sair">Sair</button></div></section>`;
+      <div class="acoes">${(S.licenca?.tipo_placom === 'demonstracao') ? '<span class="suave pequeno" style="display:block;margin-bottom:6px">A troca de senha estará disponível após a ativação do placom mensal.</span>' : '<button class="botao sec" id="trocar" type="button">Trocar senha</button>'}<button class="botao sec" id="sair" type="button">Sair</button></div></section>`;
 
   const c = conteudo();
   const $ = (s) => c.querySelector(s);
-  $('#copiar')?.addEventListener('click', async () => aviso((await copiar(link)) ? 'Link copiado' : 'Não deu para copiar', false));
-  $('#compartilhar')?.addEventListener('click', (e) => { e.preventDefault(); location.href = `https://wa.me/?text=${encodeURIComponent('Agende seu horário comigo: ' + link)}`; });
-  $('#c-whats').addEventListener('input', (e) => { e.target.value = mascaraWhatsapp(e.target.value); });
-  const endVis = () => { $('#c-end-w').hidden = !$('#c-esp').checked; }; endVis(); $('#c-esp').addEventListener('change', endVis);
-  let tipo = cfg.pix_tipo;
+  $('#copiar-bio')?.addEventListener('click', async () => aviso((await copiar(linkBio)) ? 'Link da Bio copiado! Cole com seu Instagram.' : 'Não deu para copiar', false));
+  $('#copiar')?.addEventListener('click', async () => aviso((await copiar(link)) ? 'Link de agendamento copiado!' : 'Não deu para copiar', false));
+  $('#c-whats')?.addEventListener('input', (e) => { e.target.value = mascaraWhatsapp(e.target.value); });
+  const endVis = () => { $('#c-end-w').hidden = !$('#c-esp').checked; }; endVis(); $('#c-esp')?.addEventListener('change', endVis);
+  let tipo = ['cpf', 'cnpj', 'telefone', 'email', 'aleatoria'].includes(cfg.pix_tipo) ? cfg.pix_tipo : 'telefone';
   c.querySelectorAll('#c-tipo button').forEach((b) => b.addEventListener('click', () => { tipo = b.dataset.t; c.querySelectorAll('#c-tipo button').forEach((x) => x.setAttribute('aria-pressed', x === b)); }));
   c.querySelectorAll('.expediente-linha').forEach((l) => l.querySelector('.e-ativo').addEventListener('change', (e) => { l.querySelector('.horas-campos').hidden = !e.target.checked; }));
 
@@ -1368,7 +1818,7 @@ async function telaAjustes() {
       const r2 = await seguro(() => api('/admin/config', { metodo: 'PUT', corpo }));
       if (r2) {
         S.config = r2.config;
-        cfg = r2.config;
+        if (typeof cfg !== 'undefined') cfg = r2.config;
         aviso('Ajustes salvos com sucesso!');
       }
     } finally {
@@ -1391,8 +1841,18 @@ async function telaAjustes() {
   }));
   $('#novo-bloq').addEventListener('click', () => folhaBloquear(S.hoje, telaAjustes));
   $('#btn-ajustes-mensalidades')?.addEventListener('click', () => folhaMensalidades());
-  $('#sair').addEventListener('click', async () => { await api('/admin/logout', { metodo: 'POST', corpo: {} }).catch(() => {}); S.config = null; iniciar(); });
-  $('#trocar').addEventListener('click', () => folha(`<h2>Trocar senha</h2>
+  $('#sair').addEventListener('click', async () => {
+    if (intervaloDemo) clearInterval(intervaloDemo);
+    try {
+      localStorage.removeItem('jerusabeauty_demo_info');
+      sessionStorage.clear();
+    } catch {}
+    S.demoInfo = null;
+    await api('/admin/logout', { metodo: 'POST', corpo: {} }).catch(() => {});
+    S.config = null;
+    iniciar();
+  });
+  $('#trocar')?.addEventListener('click', () => folha(`<h2>Trocar senha</h2>
     <div class="campo"><label for="pa">Senha atual</label><input id="pa" type="password" autocomplete="current-password" autofocus></div>
     <div class="campo"><label for="pn">Nova senha (mínimo 6 caracteres)</label><input id="pn" type="password" autocomplete="new-password"></div>
     <div id="pmsg"></div><div class="acoes"><button class="botao" id="pok">Trocar senha</button></div>`, (f) => {
@@ -1402,7 +1862,7 @@ async function telaAjustes() {
     });
   }));
 
-  // Web Push — Notificações no celular
+  // Web Push — Notificações com celular
   const pushContainer = $('#push-conteudo');
   function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -1425,13 +1885,13 @@ async function telaAjustes() {
         pushContainer.innerHTML = `
           <div style="background:#fefce8;border:1px solid #fef08a;border-radius:12px;padding:14px">
             <strong style="color:#854d0e">📱 Dica para iPhone / iPad</strong>
-            <p class="pequeno suave" style="margin:6px 0 0">Para receber alertas no iPhone, toque no botão de <strong>Compartilhar</strong> do Safari (ícone com a setinha para cima) e selecione <strong>"Adicionar à Tela de Início"</strong>. Abra pelo novo ícone para ativar as notificações.</p>
+            <p class="pequecom suave" style="margin:6px 0 0">Para receber alertas com iPhone, toque com botão de <strong>Compartilhar</strong> do Safari (ícone com a setinha para cima) e selecione <strong>"Adicionar à Tela de Início"</strong>. Abra pelo novo ícone para ativar as notificações.</p>
           </div>
         `;
       } else {
         pushContainer.innerHTML = `
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px">
-            <p class="pequeno suave" style="margin:0">Seu navegador atual não suporta notificações Web Push.</p>
+            <p class="pequecom suave" style="margin:0">Seu navegador atual não suporta notificações Web Push.</p>
           </div>
         `;
       }
@@ -1451,12 +1911,12 @@ async function telaAjustes() {
                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e"></span>
                 <strong style="color:#166534">Notificações Ativas neste Aparelho</strong>
               </div>
-              <span class="pequeno suave">🟢 Pronto para receber</span>
+              <span class="pequecom suave">🟢 Pronto para receber</span>
             </div>
-            <p class="pequeno suave" style="margin:0">Seu aparelho tocará e vibrará na mesma hora em que uma cliente fizer ou cancelar um agendamento.</p>
+            <p class="pequecom suave" style="margin:0">Seu aparelho tocará e vibrará na mesma hora em que uma cliente fizer ou cancelar um agendamento.</p>
             <div class="acoes duas" style="margin-top:4px">
               <button class="botao sec pequeno" id="push-btn-teste" type="button">🧪 Enviar notificação de teste</button>
-              <button class="botao sec pequeno perigo" id="push-btn-desativar" type="button">🔕 Desativar neste aparelho</button>
+              <button class="botao sec pequecom perigo" id="push-btn-desativar" type="button">🔕 Desativar neste aparelho</button>
             </div>
           </div>
         `;
@@ -1466,7 +1926,7 @@ async function telaAjustes() {
           btn.disabled = true;
           try {
             await api('/admin/push/teste', { metodo: 'POST', corpo: {} });
-            aviso('Notificação de teste disparada! Verifique o alerta no seu aparelho.');
+            aviso('Notificação de teste disparada! Verifique o alerta com seu aparelho.');
           } catch (err) {
             aviso(err.message || 'Erro ao disparar teste', true);
           } finally {
@@ -1490,19 +1950,19 @@ async function telaAjustes() {
         const ehStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
         let dicaIos = '';
         if (ehIos && !ehStandalone) {
-          dicaIos = `<p class="pequeno suave" style="margin:4px 0 0;color:#b45309">💡 No iPhone, recomendamos tocar em <strong>Compartilhar > Adicionar à Tela de Início</strong> para melhor estabilidade dos alertas.</p>`;
+          dicaIos = `<p class="pequecom suave" style="margin:4px 0 0;color:#b45309">💡 No iPhone, recomendamos tocar em <strong>Compartilhar > Adicionar à Tela de Início</strong> para melhor estabilidade dos alertas.</p>`;
         }
 
         pushContainer.innerHTML = `
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px">
             <div style="display:flex;align-items:center;gap:8px">
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8"></span>
-              <strong>Alertas no Celular Desativados</strong>
+              <strong>Alertas com Celular Desativados</strong>
             </div>
-            <p class="pequeno suave" style="margin:0">Ative para ser alertada com som e vibração assim que uma cliente agendar ou desmarcar.</p>
+            <p class="pequecom suave" style="margin:0">Ative para ser alertada com som e vibração assim que uma cliente agendar ou desmarcar.</p>
             ${dicaIos}
             <div class="acoes" style="margin-top:6px">
-              <button class="botao pequeno" id="push-btn-ativar" type="button">🔔 Ativar Notificações no meu Celular</button>
+              <button class="botao pequeno" id="push-btn-ativar" type="button">🔔 Ativar Notificações com meu Celular</button>
             </div>
           </div>
         `;
@@ -1531,12 +1991,12 @@ async function telaAjustes() {
                 auth: subJson.keys?.auth || '',
               },
             });
-            aviso('Notificações no celular ativadas com sucesso! 🎉');
+            aviso('Notificações com celular ativadas com sucesso! 🎉');
             renderizarPush();
           } catch (err) {
             aviso(err.message || 'Erro ao ativar notificações', true);
             btn.disabled = false;
-            btn.textContent = '🔔 Ativar Notificações no meu Celular';
+            btn.textContent = '🔔 Ativar Notificações com meu Celular';
           }
         });
       }
@@ -1555,7 +2015,7 @@ async function telaAjustes() {
     try {
       return qrSvg(qr);
     } catch {
-      return '<p class="pequeno erro">Erro ao processar QR Code</p>';
+      return '<p class="pequecom erro">Erro ao processar QR Code</p>';
     }
   }
 
@@ -1573,12 +2033,12 @@ async function telaAjustes() {
                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e"></span>
                 <strong style="color:#166534">WhatsApp Conectado</strong>
               </div>
-              <span class="pequeno suave">${esc(foneFmt)}</span>
+              <span class="pequecom suave">${esc(foneFmt)}</span>
             </div>
-            <p class="pequeno suave" style="margin:0">Suas clientes receberão mensagens automáticas de confirmação e lembretes por este número.</p>
+            <p class="pequecom suave" style="margin:0">Suas clientes receberão mensagens automáticas de confirmação e lembretes por este número.</p>
             <div class="acoes duas" style="margin-top:4px">
               <button class="botao sec pequeno" id="zap-btn-teste" type="button">Enviar mensagem de teste</button>
-              <button class="botao sec pequeno perigo" id="zap-btn-desconectar" type="button">Desconectar</button>
+              <button class="botao sec pequecom perigo" id="zap-btn-desconectar" type="button">Desconectar</button>
             </div>
           </div>
         `;
@@ -1587,7 +2047,7 @@ async function telaAjustes() {
           btn.disabled = true;
           try {
             await api('/admin/whatsapp/teste', { metodo: 'POST', corpo: {} });
-            aviso('Mensagem de teste enviada com sucesso no seu WhatsApp!');
+            aviso('Mensagem de teste enviada com sucesso com seu WhatsApp!');
           } catch (err) {
             aviso(err.message || 'Erro ao enviar mensagem de teste', true);
           } finally {
@@ -1611,7 +2071,7 @@ async function telaAjustes() {
               <div id="zap-qr-svg" style="max-width:220px;margin:0 auto">${renderizarQr(st.qr)}</div>
             </div>
             <p class="negrito" style="margin:12px 0 4px">Escaneie com seu WhatsApp</p>
-            <p class="pequeno suave" style="margin:0 0 12px">No seu celular: WhatsApp > Aparelhos conectados > Conectar um aparelho</p>
+            <p class="pequecom suave" style="margin:0 0 12px">No seu celular: WhatsApp > Aparelhos conectados > Conectar um aparelho</p>
             <div class="acoes" style="justify-content:center">
               <button class="botao sec pequeno" id="zap-btn-cancelar" type="button">Cancelar</button>
             </div>
@@ -1622,7 +2082,6 @@ async function telaAjustes() {
           await api('/admin/whatsapp/desconectar', { metodo: 'POST', corpo: {} }).catch(() => {});
           renderizarWhatsApp();
         });
-        let ultimoQr = st.qr;
         if (!S.zapIntervalo) {
           S.zapIntervalo = setInterval(async () => {
             const check = await api('/admin/whatsapp/status').catch(() => null);
@@ -1631,23 +2090,17 @@ async function telaAjustes() {
               S.zapIntervalo = null;
               aviso('WhatsApp conectado com sucesso!');
               renderizarWhatsApp();
-            } else if (check?.qr && check.qr !== ultimoQr) {
-              ultimoQr = check.qr;
-              const imgEl = document.querySelector('#zap-qr-svg img');
-              if (imgEl && check.qr.startsWith('data:image')) {
-                imgEl.src = check.qr;
-              } else {
-                const el = document.getElementById('zap-qr-svg');
-                if (el) el.innerHTML = renderizarQr(check.qr);
-              }
+            } else if (check?.qr && check.qr !== st.qr) {
+              const el = document.getElementById('zap-qr-svg');
+              if (el) el.innerHTML = renderizarQr(check.qr);
             }
-          }, 2500);
+          }, 3000);
         }
       } else if (st.status === 'connecting') {
         zapContainer.innerHTML = `
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center">
             <p class="negrito" style="margin:0 0 6px">Gerando QR Code...</p>
-            <p class="pequeno suave" style="margin:0 0 14px">Aguarde alguns segundos enquanto preparamos a conexão com o WhatsApp.</p>
+            <p class="pequecom suave" style="margin:0 0 14px">Aguarde alguns segundos enquanto preparamos a conexão com o WhatsApp.</p>
             <div class="acoes" style="justify-content:center">
               <button class="botao sec pequeno" id="zap-btn-cancelar" type="button">Cancelar</button>
             </div>
@@ -1676,7 +2129,7 @@ async function telaAjustes() {
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#94a3b8"></span>
               <strong>WhatsApp Desconectado</strong>
             </div>
-            <p class="pequeno suave" style="margin:0">Conecte o seu WhatsApp para ativar as notificações e lembretes automáticos das clientes.</p>
+            <p class="pequecom suave" style="margin:0">Conecte o seu WhatsApp para ativar as notificações e lembretes automáticos das clientes.</p>
             <div class="acoes" style="margin-top:6px">
               <button class="botao pequeno" id="zap-btn-conectar" type="button">Conectar WhatsApp</button>
             </div>

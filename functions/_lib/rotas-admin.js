@@ -91,10 +91,16 @@ rota('PUT', '/admin/config', async ({ db, corpo }) => {
     else if (CHAVES_BOOL.includes(k)) novo[k] = !!v;
     else if (k === 'whatsapp') novo[k] = v ? normalizarWhatsapp(v) : '';
     else if (k === 'pix_tipo') {
-      if (!['cpf', 'cnpj', 'telefone', 'email', 'aleatoria'].includes(v)) throw erro(400, 'dado_invalido', 'Tipo de chave Pix inválido.');
-      novo[k] = v;
+      const vNorm = v === 'chave' || !v ? 'telefone' : String(v ?? '').trim().toLowerCase();
+      novo[k] = ['cpf', 'cnpj', 'telefone', 'email', 'aleatoria'].includes(vNorm) ? vNorm : 'telefone';
+    } else if (k === 'pix_cidade') {
+      novo[k] = v ? String(v).trim().slice(0, 15) : '';
+    } else if (k === 'pix_nome') {
+      novo[k] = v ? String(v).trim().slice(0, 25) : '';
+    } else if (k === 'pix_chave') {
+      novo[k] = v ? String(v).trim().slice(0, 80) : '';
     } else {
-      const max = { nome_negocio: 80, endereco_espaco: 200, pix_chave: 80, pix_nome: 25, pix_cidade: 15 }[k];
+      const max = { nome_negocio: 80, endereco_espaco: 200 }[k];
       novo[k] = texto(v, max, k.replace(/_/g, ' '));
     }
   }

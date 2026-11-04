@@ -177,3 +177,98 @@ export function ajustarExclusividadeServicos(servicos, idsSet, idClicado) {
   }
 }
 
+// ======================================================================== Visualização de Mensalidades (App da Manicure)
+export function selecionarFaturasVisiveis(faturas, hojeIso) {
+  if (!Array.isArray(faturas) || faturas.length <= 3) return faturas || [];
+  const hoje = hojeIso || new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+  const mesAtual = hoje.slice(0, 7);
+
+  const ordenadas = [...faturas].sort((a, b) => (a.data_vencimento || a.mes_ano).localeCompare(b.data_vencimento || b.mes_ano));
+
+  // Se houver alguma fatura pendente com vencimento anterior ao mês atual, inicia por ela para manter o aviso visível
+  const idxPendenteAnterior = ordenadas.findIndex((f) => f.status === 'pendente' && f.mes_ano < mesAtual);
+  if (idxPendenteAnterior !== -1) {
+    return ordenadas.slice(idxPendenteAnterior, idxPendenteAnterior + 3);
+  }
+
+  // Senão, localiza o mês atual e mais 2
+  const idxMesAtual = ordenadas.findIndex((f) => f.mes_ano === mesAtual);
+  if (idxMesAtual !== -1) {
+    return ordenadas.slice(idxMesAtual, idxMesAtual + 3);
+  }
+
+  const idxPendente = ordenadas.findIndex((f) => f.status === 'pendente');
+  const inicio = idxPendente !== -1 ? idxPendente : 0;
+  return ordenadas.slice(inicio, inicio + 3);
+}
+
+export function classificarEstiloFatura(fatura, hojeIso) {
+  const hoje = hojeIso || new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+  const mesAtual = hoje.slice(0, 7);
+  const dataVenc = fatura.data_vencimento ? fatura.data_vencimento.slice(0, 10) : '';
+  const pago = fatura.status === 'pago';
+
+  // 1. Paga: linha verde
+  if (pago) {
+    return {
+      tipo: 'paga',
+      corLinha: '#2f6b3b',
+      borda: '2px solid #2f6b3b',
+      fundo: '#ecfdf5',
+      rotulo: '✓ Pago',
+      badgeCor: '#047857',
+      badgeFundo: '#d1fae5',
+    };
+  }
+
+  // 2. Atrasada: pendente e passou da data de vencimento -> linha vermelha
+  if (dataVenc && hoje > dataVenc) {
+    return {
+      tipo: 'atrasada',
+      corLinha: '#a63a2b',
+      borda: '2px solid #a63a2b',
+      fundo: '#fef2f2',
+      rotulo: '⚠️ Atrasada',
+      badgeCor: '#991b1b',
+      badgeFundo: '#fee2e2',
+    };
+  }
+
+  // 3. No dia do vencimento: hoje === dataVenc -> linha âmbar
+  if (dataVenc && hoje === dataVenc) {
+    return {
+      tipo: 'no_dia',
+      corLinha: '#d97706',
+      borda: '2px solid #d97706',
+      fundo: '#fffbeb',
+      rotulo: '⏰ Vence Hoje',
+      badgeCor: '#b45309',
+      badgeFundo: '#fef3c7',
+    };
+  }
+
+  // 4. Mês atual dentro do prazo: borda verde suave
+  if (fatura.mes_ano === mesAtual) {
+    return {
+      tipo: 'mes_atual',
+      corLinha: '#2f6b3b',
+      borda: '2px solid #2f6b3b',
+      fundo: '#ecfdf5',
+      rotulo: '🟢 Mês Atual',
+      badgeCor: '#047857',
+      badgeFundo: '#d1fae5',
+    };
+  }
+
+  // 5. Meses subsequentes: linha suave padrão
+  return {
+    tipo: 'futura',
+    corLinha: '#efdad7',
+    borda: '1.5px solid var(--linha, #efdad7)',
+    fundo: 'var(--papel, #ffffff)',
+    rotulo: 'A vencer',
+    badgeCor: '#614d4e',
+    badgeFundo: '#fdf6f5',
+  };
+}
+
