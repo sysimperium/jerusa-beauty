@@ -16,13 +16,17 @@ logo_512.save(os.path.join(IMG_DIR, 'logo.png'), 'PNG', optimize=True)
 logo_512.save(os.path.join(IMG_DIR, 'logo-retrato.png'), 'PNG', optimize=True)
 logo_512.save(os.path.join(IMG_DIR, 'icon-512.png'), 'PNG', optimize=True)
 
-# 2. Preview WhatsApp / OpenGraph (1200x630 com margem)
-canvas_preview = Image.new("RGBA", (1200, 630), (255, 255, 255, 255))
-logo_preview_fit = img.resize((500, 500), Image.Resampling.LANCZOS)
-offset_x = (1200 - 500) // 2
-offset_y = (630 - 500) // 2
-canvas_preview.paste(logo_preview_fit, (offset_x, offset_y), logo_preview_fit)
-canvas_preview.convert("RGB").save(os.path.join(IMG_DIR, 'logo-preview.png'), 'PNG', optimize=True)
+# 2. Preview WhatsApp / OpenGraph (1200x630 com margem integrada ao tom da marca)
+bg_color = img.getpixel((10, 10))[:3]
+canvas_preview = Image.new("RGB", (1200, 630), bg_color)
+logo_preview_fit = img.resize((520, 520), Image.Resampling.LANCZOS)
+offset_x = (1200 - 520) // 2
+offset_y = (630 - 520) // 2
+if logo_preview_fit.mode == 'RGBA':
+    canvas_preview.paste(logo_preview_fit, (offset_x, offset_y), logo_preview_fit)
+else:
+    canvas_preview.paste(logo_preview_fit, (offset_x, offset_y))
+canvas_preview.save(os.path.join(IMG_DIR, 'logo-preview.png'), 'PNG', optimize=True)
 
 # 3. Icon 192x192 (PWA Android)
 img.resize((192, 192), Image.Resampling.LANCZOS).save(os.path.join(IMG_DIR, 'icon-192.png'), 'PNG', optimize=True)
