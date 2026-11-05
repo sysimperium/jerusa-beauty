@@ -480,6 +480,67 @@ function abrirModalPixMensalidade(mesAnoStr, valorCents, pixRoot) {
   }
 }
 
+// ======================================================================== contrato digital assinado (SysImperium Root)
+function folhaContratoAssinado(contrato) {
+  if (!contrato) return;
+  const dataAssinatura = contrato.assinado_em
+    ? new Date(contrato.assinado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    : 'Assinado eletronicamente';
+  const telAssinante = contrato.whatsapp_assinante
+    ? mascaraWhatsapp(contrato.whatsapp_assinante)
+    : 'WhatsApp cadastrado';
+  const valorFmt = moeda(contrato.valor_mensalidade_centavos || S.licenca?.valor_mensalidade_centavos || 3990);
+  const diaVenc = contrato.dia_vencimento || S.licenca?.dia_vencimento || 10;
+  const linkPublico = `https://root-sysimperium.pages.dev/contrato/?token=${encodeURIComponent(contrato.token || '')}`;
+
+  folha(`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px">
+      <h2 style="margin:0;font-size:1.15rem">📜 Contrato de Prestação de Serviços</h2>
+      <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado</span>
+    </div>
+    <p class="sub-texto" style="margin-top:0">SysImperium Soluções Tecnológicas & Jerusa Beauty</p>
+
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.82rem;color:#166534">
+      <div style="font-weight:700;margin-bottom:4px">Assinatura Digital Autenticada</div>
+      <div>• Assinado via WhatsApp: <strong>${esc(telAssinante)}</strong></div>
+      <div>• Data / Horário: <strong>${esc(dataAssinatura)}</strong></div>
+      <div>• Código de Autenticidade: <code style="font-size:0.75rem;background:#dcfce7;padding:1px 5px;border-radius:4px">${esc(contrato.token || 'AUTENTICADO')}</code></div>
+    </div>
+
+    <div style="max-height:300px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;font-size:0.83rem;line-height:1.55;color:#334155">
+      <p style="margin-top:0"><strong>PARTES:</strong><br>
+      <strong>CONTRATADA:</strong> SysImperium Soluções Tecnológicas (representada por Ian Victor de Oliveira Souza).<br>
+      <strong>CONTRATANTE:</strong> Jerusa Beauty, através de sua titular cadastrada.</p>
+
+      <p><strong>CLÁUSULA 1ª — OBJETO DO CONTRATO:</strong><br>
+      Concessão de licença de uso do software SaaS SysImperium para agendamento online de clientes, gestão de atendimentos, catálogo de serviços e controle financeiro diário.</p>
+
+      <p><strong>CLÁUSULA 2ª — VALOR DA MENSALIDADE:</strong><br>
+      Pelos serviços, hospedagem em nuvem e suporte técnico contínuo, a CONTRATANTE pagará o valor mensal de <strong>${valorFmt}/mês</strong>, com vencimento todo <strong>dia ${diaVenc}</strong> de cada mês subsequente, via Pix.</p>
+
+      <p style="background:#fefce8;border-left:3px solid #eab308;padding:8px;border-radius:4px;color:#854d0e"><strong>CLÁUSULA 3ª — SEM CARÊNCIA NEM FIDELIDADE (CANCELAMENTO LIVRE):</strong><br>
+      <strong>O presente contrato NÃO possui carência nem cláusula de fidelidade mínima para término.</strong> A CONTRATANTE tem total liberdade para solicitar o encerramento do serviço a qualquer momento, sem qualquer tipo de multa rescisória, taxa de cancelamento ou aviso prévio obrigatório.</p>
+
+      <p><strong>CLÁUSULA 4ª — SUPORTE E DISPONIBILIDADE:</strong><br>
+      A SysImperium compromete-se com a segurança da infraestrutura, estabilidade do servidor em nuvem, backup de dados das clientes e suporte técnico prioritário via WhatsApp.</p>
+
+      <p style="margin-bottom:0"><strong>CLÁUSULA 5ª — VALIDADE JURÍDICA DA ASSINATURA:</strong><br>
+      As partes concordam que a concordância eletrônica vinculada ao número de WhatsApp cadastrado possui plena validade jurídica e probatória, conforme art. 10 da MP 2.200-2/2001 e Lei Federal nº 14.063/2020.</p>
+    </div>
+
+    <div class="acoes" style="display:flex;gap:8px">
+      <button class="botao sec" id="btn-copiar-link-contrato" type="button" style="flex:1">Copiar Link do Contrato</button>
+      <button class="botao" id="btn-fechar-contrato" type="button" style="flex:1">Fechar</button>
+    </div>
+  `, (f) => {
+    f.querySelector('#btn-fechar-contrato')?.addEventListener('click', () => fecharFolha());
+    f.querySelector('#btn-copiar-link-contrato')?.addEventListener('click', async () => {
+      const ok = await copiar(linkPublico);
+      aviso(ok ? 'Link do contrato copiado com sucesso!' : 'Não foi possível copiar o link', !ok);
+    });
+  });
+}
+
 // ======================================================================== atendimento (cartão + ações)
 function linhaAtendimento(a, agoraMin = null) {
   const dom = a.local === 'domicilio';
@@ -1816,7 +1877,26 @@ async function telaAjustes() {
     </section>` : ''}
 
     <section class="secao"><h2>Segurança</h2>
-      <div class="acoes">${(S.licenca?.tipo_placom === 'demonstracao') ? '<span class="suave pequeno" style="display:block;margin-bottom:6px">A troca de senha estará disponível após a ativação do placom mensal.</span>' : '<button class="botao sec" id="trocar" type="button">Trocar senha</button>'}<button class="botao sec" id="sair" type="button">Sair</button></div></section>`;
+      <div class="acoes">${(S.licenca?.tipo_placom === 'demonstracao') ? '<span class="suave pequeno" style="display:block;margin-bottom:6px">A troca de senha estará disponível após a ativação do placom mensal.</span>' : '<button class="botao sec" id="trocar" type="button">Trocar senha</button>'}<button class="botao sec" id="sair" type="button">Sair</button></div></section>
+
+    ${(S.licenca?.contrato?.status === 'assinado') ? `
+    <section class="secao" id="secao-contrato-digital"><h2>📜 Contrato Digital de Adesão</h2>
+      <p class="sub-texto">Termos de prestação de serviços e licença de uso do software.</p>
+      <div class="cartao" style="background:#f8fafc;border:1px solid #cbd5e1;padding:14px;border-radius:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+          <strong style="color:#0f172a">Contrato SysImperium & Jerusa Beauty</strong>
+          <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600">✓ Assinado Digitalmente</span>
+        </div>
+        <div class="suave pequeno" style="line-height:1.55">
+          • Mensalidade: <strong>${moeda(S.licenca.contrato.valor_mensalidade_centavos || S.licenca.valor_mensalidade_centavos || 3990)}/mês</strong><br>
+          • Carência / Fidelidade: <strong>Sem carência nem multa para término (cancelamento livre)</strong><br>
+          • Assinado em: <strong>${S.licenca.contrato.assinado_em ? new Date(S.licenca.contrato.assinado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'Vigente'}</strong>
+        </div>
+      </div>
+      <div class="acoes">
+        <button class="botao sec" id="btn-ver-contrato-ajustes" type="button" style="width:100%">Visualizar Contrato Completo</button>
+      </div>
+    </section>` : ''}`;
 
   const c = conteudo();
   const $ = (s) => c.querySelector(s);
@@ -1929,6 +2009,7 @@ async function telaAjustes() {
   }));
   $('#novo-bloq').addEventListener('click', () => folhaBloquear(S.hoje, telaAjustes));
   $('#btn-ajustes-mensalidades')?.addEventListener('click', () => folhaMensalidades());
+  $('#btn-ver-contrato-ajustes')?.addEventListener('click', () => folhaContratoAssinado(S.licenca?.contrato));
   $('#sair').addEventListener('click', async () => {
     if (intervaloDemo) clearInterval(intervaloDemo);
     try {
