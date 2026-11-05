@@ -730,7 +730,11 @@ function linhaAtendimento(a, agoraMin = null) {
     if (!a.pago) etiq.push('<span class="selo-texto pend">A receber</span>');
     else etiq.push('<span class="selo-texto ok">Pago</span>');
   } else if (a.status === 'cancelado') {
-    etiq.push('<span class="selo-texto">Cancelado</span>');
+    if (a.sinal_status === 'recusado') {
+      etiq.push(`<span class="selo-texto perigo" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5" title="Horário liberado por falta de sinal (${a.sinal_porcentagem || 30}%)">✕ Falta de sinal (${a.sinal_porcentagem || 30}%)</span>`);
+    } else {
+      etiq.push('<span class="selo-texto" style="background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1" title="Cancelado pelo cliente">Cancelado pelo cliente</span>');
+    }
   } else if (a.status === 'faltou') {
     etiq.push('<span class="selo-texto">Faltou</span>');
   } else if (a.status === 'agendado') {
@@ -799,6 +803,23 @@ function abrirAtendimento(a, recarregar) {
     <div style="margin:12px 0;background:#fffdf7;border:1.5px solid #f59e0b;border-radius:12px;padding:12px 14px;color:#92400e">
       <strong style="display:block;font-size:.9rem;margin-bottom:2px">⚠️ Atendimento concluído?</strong>
       <span class="pequeno" style="color:#78350f">O horário previsto já encerrou. Confirme a conclusão abaixo ou escolha reagendar caso não tenha acontecido.</span>
+    </div>` : ''}
+
+    ${a.status === 'cancelado' && a.sinal_status === 'recusado' ? `
+    <div style="margin:12px 0;background:#fee2e2;border:1.5px solid #fca5a5;border-radius:12px;padding:12px 14px;color:#991b1b">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:.92rem">✕ Cancelado por Falta de Sinal (${a.sinal_porcentagem || 30}%)</strong>
+        <span class="selo-texto perigo">Vaga Liberada</span>
+      </div>
+      <p class="pequeno" style="margin:4px 0 0;color:#7f1d1d">
+        Este atendimento não foi realizado porque o comprovante do sinal de ${moeda(a.sinal_valor_centavos || 0)} não foi enviado ou confirmado no prazo. O horário já se encontra liberado na agenda.
+      </p>
+    </div>` : ''}
+
+    ${a.status === 'cancelado' && a.sinal_status !== 'recusado' ? `
+    <div style="margin:12px 0;background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:12px;padding:12px 14px;color:#475569">
+      <strong style="display:block;font-size:.9rem;margin-bottom:2px">Cancelado pelo cliente</strong>
+      <span class="pequeno">O próprio cliente cancelou este agendamento previamente pelo site.</span>
     </div>` : ''}
     <dl class="resumo">
       ${a.servicos.map((s) => `<div><dt>${esc(s.nome)}</dt><dd>${moeda(s.preco_centavos)}</dd></div>`).join('')}
@@ -1255,24 +1276,32 @@ async function telaInicio() {
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px;">
           <div>
             <strong style="color: var(--cor-perigo, #e11d48); font-size: 1rem; display: flex; align-items:center; gap: 6px;">
-              <span>⚠️</span> Cancelamentos Recentes (${canceladosVisiveis.length})
+              <span>⚠️</span> Cancelamentos e Falta de Sinal (${canceladosVisiveis.length})
             </strong>
-            <p class="pequecom suave" style="margin: 2px 0 0 0;">Clientes que cancelaram horário recentemente. Horário liberado na agenda.</p>
+            <p class="pequecom suave" style="margin: 2px 0 0 0;">Horários desmarcados ou liberados por falta de confirmação do sinal.</p>
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap: 8px; margin-top: 10px;">
-          ${canceladosVisiveis.map((c) => `
+          ${canceladosVisiveis.map((c) => {
+            const ehFaltaSinal = c.sinal_status === 'recusado';
+            const zapTexto = ehFaltaSinal
+              ? `Olá, ${c.cliente_nome.split(' ')[0]}! Tudo bem? Vi que seu horário de ${dataCurta(c.data)} às ${hora(c.inicio_min)} foi liberado por falta de confirmação do sinal (${c.sinal_porcentagem || 30}%). Caso ainda tenha interesse ou queira agendar outro dia, estou à disposição!`
+              : `Olá, ${c.cliente_nome.split(' ')[0]}! Tudo bem? Vi que precisou cancelar seu horário de ${dataCurta(c.data)} às ${hora(c.inicio_min)}. Gostaria de remarcar para outro dia?`;
+            return `
             <div class="item-cancelado-alerta" data-id="${c.id}" style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #fecdd3; gap:10px; flex-wrap:wrap;">
               <div>
-                <strong style="font-size:0.9rem">${esc(c.cliente_nome)}</strong>
-                <div class="pequecom suave">${dataCurta(c.data)} às ${hora(c.inicio_min)} (${c.local === 'espaco' ? 'Espaço' : 'Domicílio'})</div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <strong style="font-size:0.9rem">${esc(c.cliente_nome)}</strong>
+                  ${ehFaltaSinal ? `<span class="selo-texto perigo" style="background:#fee2e2;color:#b91c1c;font-size:10.5px;padding:1px 6px;border-radius:4px">✕ Falta de sinal (${c.sinal_porcentagem || 30}%)</span>` : '<span class="selo-texto" style="font-size:10.5px;padding:1px 6px;border-radius:4px">Cancelado pelo cliente</span>'}
+                </div>
+                <div class="pequecom suave">${dataCurta(c.data)} às ${hora(c.inicio_min)} (${c.local === 'espaco' ? 'Espaço' : 'Domicílio'}) · ${ehFaltaSinal ? `Sinal de ${moeda(c.sinal_valor_centavos || 0)} não enviado` : 'Cancelado pelo cliente'}</div>
               </div>
               <div style="display:flex; gap:6px; align-items:center;">
-                ${c.cliente_whatsapp ? `<a class="botao sec pequecom btn-zap-cancelado" data-id="${c.id}" href="${linkWhatsapp(c.cliente_whatsapp, 'Olá, ' + c.cliente_nome.split(' ')[0] + '! Tudo bem? Vi que precisou cancelar seu horário de ' + dataCurta(c.data) + ' às ' + hora(c.inicio_min) + '. Gostaria de remarcar para outro dia?')}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar com Zap</a>` : ''}
+                ${c.cliente_whatsapp ? `<a class="botao sec pequecom btn-zap-cancelado" data-id="${c.id}" href="${linkWhatsapp(c.cliente_whatsapp, zapTexto)}" target="_blank" rel="noopener" style="font-size:.75rem;padding:3px 8px">Chamar com Zap</a>` : ''}
                 <button class="botao sec pequecom btn-fechar-cancelado" data-id="${c.id}" type="button" title="Dispensar aviso" style="font-size:.75rem;padding:3px 8px;color:#888;">Fechar</button>
               </div>
             </div>
-          `).join('')}
+          `; }).join('')}
         </div>
         <div style="margin-top:10px; text-align:right;">
           <button class="botao sec pequecom btn-fechar-todos-cancelados" type="button" style="font-size:0.75rem; padding: 2px 8px; opacity:0.8;">Dispensar todos</button>
@@ -1582,8 +1611,8 @@ async function telaAgenda() {
     ${canceladosHoje.length > 0 ? `
       <div class="aviso-cancelados" style="background:#fff1f2;border:1px solid #fecdd3;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <strong style="color:#e11d48;font-size:0.9rem">⚠️ ${canceladosHoje.length} atendimento(s) cancelado(s) nesta data</strong>
-          <div class="pequecom suave">${canceladosHoje.map((c) => esc(c.cliente_nome) + ' (' + hora(c.inicio_min) + ')').join(', ')}</div>
+          <strong style="color:#e11d48;font-size:0.9rem">⚠️ ${canceladosHoje.length} atendimento(s) cancelado(s) / liberado(s) nesta data</strong>
+          <div class="pequecom suave">${canceladosHoje.map((c) => esc(c.cliente_nome) + ' (' + hora(c.inicio_min) + (c.sinal_status === 'recusado' ? ` · falta de sinal ${c.sinal_porcentagem || 30}%` : ' · cancelado pelo cliente') + ')').join(', ')}</div>
         </div>
         <button class="botao sec pequeno" id="atalho-ver-cancelados" type="button" style="font-size:0.75rem">Ver detalhes</button>
       </div>

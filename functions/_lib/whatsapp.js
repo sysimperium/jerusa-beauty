@@ -303,10 +303,13 @@ export function formatarMensagemSinalNaoRecebido(cfg, a) {
   const dataFmt = `${dia}/${mes}/${ano}`;
   const horaFmt = String(Math.floor(a.inicio_min / 60)).padStart(2, '0') + ':' + String(a.inicio_min % 60).padStart(2, '0');
   const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+  const pct = a.sinal_porcentagem || 30;
 
   return `Olá, *${a.cliente_nome}*! 👋
 
-Como não identificamos o envio do comprovante do sinal no prazo para o horário de *${dataFmt} às ${horaFmt}*, o horário foi liberado na agenda da *${nomeNegocio}*.
+Informamos que seu horário de *${dataFmt} às ${horaFmt}* na *${nomeNegocio}* foi liberado por *falta de sinal (${pct}%)*.
+
+Como não identificamos o envio do comprovante do sinal no prazo estipulado, o horário foi liberado na agenda da *${nomeNegocio}*.
 
 Caso queira reagendar para outro dia ou horário, acesse o link quando quiser:
 👉 https://jerusa-beauty.pages.dev/ 💕`;

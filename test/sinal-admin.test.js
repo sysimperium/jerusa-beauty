@@ -39,6 +39,7 @@ test('sinal-admin: formatacao de mensagens de whatsapp para sinal', () => {
   const recusado = formatarMensagemSinalNaoRecebido(cfg, agendamento);
   assert.match(recusado, /Ana/);
   assert.match(recusado, /liberado/i);
+  assert.match(recusado, /falta de sinal/i);
 });
 
 test('sinal-admin: ativar sinal sem chave pix nos ajustes lanca erro 400', async () => {

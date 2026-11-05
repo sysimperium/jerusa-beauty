@@ -377,13 +377,24 @@ async function telaMeu(token) {
   }
   S.cfg = S.cfg || { nome: a.nome_negocio, servicos: [] };
   const cancelado = a.status === 'cancelado';
-  const titulo = cancelado ? 'Agendamento cancelado' : a.status === 'concluido' ? 'Atendimento concluído' : 'Seu horário';
-  const msgCancela = `Olá! Cancelei meu agendamento de ${dataLonga(a.data)} às ${hora(a.inicio_min)} (${a.servicos.map((s) => s.nome).join(' + ')}). Nome: ${a.cliente_nome}`;
+  const faltaSinal = cancelado && a.sinal_status === 'recusado';
+  const titulo = faltaSinal ? 'Horário liberado (falta de sinal)' : cancelado ? 'Agendamento cancelado' : a.status === 'concluido' ? 'Atendimento concluído' : 'Seu horário';
+  const msgCancela = faltaSinal
+    ? `Olá! Vi que meu horário de ${dataLonga(a.data)} às ${hora(a.inicio_min)} foi liberado por falta de confirmação do sinal (${a.sinal_porcentagem || 30}%). Nome: ${a.cliente_nome}. Gostaria de saber se ainda posso agendar!`
+    : `Olá! Cancelei meu agendamento de ${dataLonga(a.data)} às ${hora(a.inicio_min)} (${a.servicos.map((s) => s.nome).join(' + ')}). Nome: ${a.cliente_nome}`;
   const total = a.preco_tabela_centavos || a.servicos.reduce((s, x) => s + x.preco_centavos, 0);
   const sinalCentavos = a.sinal_valor_centavos || 0;
   const saldoCentavos = Math.max(0, total - sinalCentavos);
 
-  const avisoSinal = a.sinal_status === 'pendente' && sinalCentavos > 0
+  const avisoSinal = faltaSinal
+    ? `<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">✕</span>
+        <div>
+          <strong style="color:#991b1b;font-size:0.9rem">Horário liberado por falta de sinal (${a.sinal_porcentagem || 30}%)</strong>
+          <p class="pequecom suave" style="margin:2px 0 0;color:#7f1d1d">Como o comprovante do sinal de ${moeda(sinalCentavos)} não foi enviado ou confirmado no prazo, a vaga foi liberada na agenda.</p>
+        </div>
+      </div>`
+    : a.sinal_status === 'pendente' && sinalCentavos > 0
     ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
         <span style="font-size:22px">⏳</span>
         <div>
@@ -403,7 +414,7 @@ async function telaMeu(token) {
 
   const rodape = cancelado
     ? `<div class="acoes">
-        ${a.whatsapp ? `<a class="botao sec" href="${linkWhatsapp(a.whatsapp, msgCancela)}" target="_blank" rel="noopener">Avisar a manicure no WhatsApp</a>` : ''}
+        ${a.whatsapp ? `<a class="botao sec" href="${linkWhatsapp(a.whatsapp, msgCancela)}" target="_blank" rel="noopener">${faltaSinal ? 'Falar com a manicure no WhatsApp' : 'Avisar a manicure no WhatsApp'}</a>` : ''}
         <a class="botao" href="/">Marcar novo horário</a>
        </div>`
     : a.status !== 'agendado' ? '<div class="acoes"><a class="botao" href="/">Marcar novo horário</a></div>'
