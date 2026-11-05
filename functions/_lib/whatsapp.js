@@ -258,6 +258,60 @@ export async function garantirColunasLembretes(db) {
   }
 }
 
+export function formatarMensagemLembreteSinal(cfg, a) {
+  const [ano, mes, dia] = a.data.split('-');
+  const dataFmt = `${dia}/${mes}/${ano}`;
+  const horaFmt = String(Math.floor(a.inicio_min / 60)).padStart(2, '0') + ':' + String(a.inicio_min % 60).padStart(2, '0');
+  const servicosTexto = a.servicos && a.servicos.length > 0 ? a.servicos.map((s) => s.nome).join(', ') : 'Atendimento';
+  const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+  const valorSinal = ((a.sinal_valor_centavos || 0) / 100).toFixed(2).replace('.', ',');
+  const tipoChave = cfg.pix_tipo ? `(${cfg.pix_tipo})` : '';
+
+  return `Olá, *${a.cliente_nome}*! ✨
+
+Passando para lembrar que estamos aguardando o envio do comprovante do sinal de *R$ ${valorSinal}* (${a.sinal_porcentagem || 30}%) para confirmar seu horário na *${nomeNegocio}*:
+
+📅 *Data:* ${dataFmt} às ${horaFmt}
+💅 *Serviço(s):* ${servicosTexto}
+
+🔑 *Chave Pix ${tipoChave}:* ${cfg.pix_chave}
+👤 *Titular:* ${cfg.pix_nome || nomeNegocio}
+
+Assim que enviar o comprovante por aqui, seu horário estará 100% confirmado! Qualquer dúvida, fico à disposição. 💕`;
+}
+
+export function formatarMensagemSinalConfirmado(cfg, a) {
+  const [ano, mes, dia] = a.data.split('-');
+  const dataFmt = `${dia}/${mes}/${ano}`;
+  const horaFmt = String(Math.floor(a.inicio_min / 60)).padStart(2, '0') + ':' + String(a.inicio_min % 60).padStart(2, '0');
+  const servicosTexto = a.servicos && a.servicos.length > 0 ? a.servicos.map((s) => s.nome).join(', ') : 'Atendimento';
+  const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+  const valorSinal = ((a.sinal_valor_centavos || 0) / 100).toFixed(2).replace('.', ',');
+
+  return `Olá, *${a.cliente_nome}*! ✨
+
+Comprovante do sinal de *R$ ${valorSinal}* recebido com sucesso! Seu horário na *${nomeNegocio}* está *confirmado*! 🎉
+
+📅 *Data:* ${dataFmt} às ${horaFmt}
+💅 *Serviço(s):* ${servicosTexto}
+
+Estamos ansiosas para te atender! Até lá! 💕`;
+}
+
+export function formatarMensagemSinalNaoRecebido(cfg, a) {
+  const [ano, mes, dia] = a.data.split('-');
+  const dataFmt = `${dia}/${mes}/${ano}`;
+  const horaFmt = String(Math.floor(a.inicio_min / 60)).padStart(2, '0') + ':' + String(a.inicio_min % 60).padStart(2, '0');
+  const nomeNegocio = cfg.nome_negocio || 'Jerusa Beauty';
+
+  return `Olá, *${a.cliente_nome}*! 👋
+
+Como não identificamos o envio do comprovante do sinal no prazo para o horário de *${dataFmt} às ${horaFmt}*, o horário foi liberado na agenda da *${nomeNegocio}*.
+
+Caso queira reagendar para outro dia ou horário, acesse o link quando quiser:
+👉 https://jerusa-beauty.pages.dev/ 💕`;
+}
+
 export function formatarMensagemLembrete24h(cfg, a) {
   const [ano, mes, dia] = a.data.split('-');
   const dataFmt = `${dia}/${mes}/${ano}`;

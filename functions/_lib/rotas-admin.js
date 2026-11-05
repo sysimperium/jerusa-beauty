@@ -13,6 +13,7 @@ import {
 import {
   obterStatusZap, conectarZap, desconectarZap, enviarMensagemZap, notificarAgendamentoZap, processarLembretes, processarFidelizacao,
   extrairDiaMesAniversario, processarAniversarios, garantirColunasLembretes,
+  formatarMensagemLembreteSinal, formatarMensagemSinalConfirmado, formatarMensagemSinalNaoRecebido,
 } from './whatsapp.js';
 import {
   obterOuCriarChavesVapid, garantirTabelaPush, dispararPushParaTodos,
@@ -79,6 +80,8 @@ const LIMITES = {
   respiro_min: [0, 120], deslocamento_min: [0, 180], antecedencia_min: [0, 10080],
   janela_dias: [1, 365], passo_min: [5, 120], cancelar_horas: [0, 240],
   alerta_sumidos_dias: [3, 365],
+  sinal_porcentagem: [1, 100],
+  sinal_prazo_horas: [1, 48],
 };
 
 rota('PUT', '/admin/config', async ({ db, corpo }) => {
@@ -114,6 +117,9 @@ rota('PUT', '/admin/config', async ({ db, corpo }) => {
     throw erro(400, 'dado_invalido', 'Ative pelo menos um tipo de atendimento (espaço ou domicílio).');
   }
   if (!novo.nome_negocio) throw erro(400, 'dado_invalido', 'Informe o nome do negócio.');
+  if (novo.sinal_ativo && (!novo.pix_chave || !novo.pix_chave.trim())) {
+    throw erro(400, 'pix_obrigatorio', 'Para ativar a cobrança de sinal, configure a chave Pix, o nome do titular e a cidade na guia Ajustes.');
+  }
   const stmt = db.prepare(
     'INSERT INTO config (chave, valor) VALUES (?1, ?2) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor');
   await db.batch(CHAVES_CONFIG.map((k) => {
@@ -121,6 +127,36 @@ rota('PUT', '/admin/config', async ({ db, corpo }) => {
     return stmt.bind(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v ?? ''));
   }));
   return json({ config: novo });
+}, { admin: true });
+
+rota('PUT', '/admin/config/sinal', async ({ db, corpo }) => {
+  const atual = await carregarConfig(db);
+  const sinalAtivo = !!corpo.sinal_ativo;
+  const sinalPorcentagem = corpo.sinal_porcentagem !== undefined
+    ? inteiro(corpo.sinal_porcentagem, 1, 100, 'Porcentagem do sinal')
+    : atual.sinal_porcentagem;
+  const sinalPrazoHoras = corpo.sinal_prazo_horas !== undefined
+    ? inteiro(corpo.sinal_prazo_horas, 1, 48, 'Prazo do sinal em horas')
+    : atual.sinal_prazo_horas;
+
+  if (sinalAtivo && (!atual.pix_chave || !atual.pix_chave.trim())) {
+    throw erro(400, 'pix_obrigatorio', 'Para ativar a cobrança de sinal, configure a chave Pix, o nome do titular e a cidade na guia Ajustes.');
+  }
+
+  const stmt = db.prepare(
+    'INSERT INTO config (chave, valor) VALUES (?1, ?2) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor');
+  await db.batch([
+    stmt.bind('sinal_ativo', sinalAtivo ? '1' : '0'),
+    stmt.bind('sinal_porcentagem', String(sinalPorcentagem)),
+    stmt.bind('sinal_prazo_horas', String(sinalPrazoHoras)),
+  ]);
+
+  return json({
+    ok: true,
+    sinal_ativo: sinalAtivo,
+    sinal_porcentagem: sinalPorcentagem,
+    sinal_prazo_horas: sinalPrazoHoras,
+  });
 }, { admin: true });
 
 rota('PUT', '/admin/expediente', async ({ db, corpo }) => {
@@ -216,6 +252,7 @@ rota('DELETE', '/admin/servicos/:id', async ({ db, params }) => {
 // ---------- agendamentos ----------
 const SELECT_AGEND = `SELECT a.id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco, a.referencia,
   a.preco_tabela_centavos, a.valor_cobrado_centavos, a.status, a.pago, a.forma_pagamento, a.observacoes, a.origem, a.token,
+  a.sinal_status, a.sinal_porcentagem, a.sinal_valor_centavos, a.sinal_pago, a.sinal_pago_em, a.criado_em,
   c.id AS cliente_id, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
   FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id`;
 
@@ -381,6 +418,92 @@ rota('DELETE', '/admin/agendamentos/:id', async ({ db, params }) => {
   return json({ ok: true });
 }, { admin: true });
 
+rota('POST', '/admin/agendamentos/:id/confirmar-sinal', async ({ db, env, params }) => {
+  const id = inteiro(params.id, 1, 1e12, 'Id');
+  const a = await db.prepare(
+    `SELECT a.*, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
+     FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id WHERE a.id = ?1`
+  ).bind(id).first();
+  if (!a) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
+
+  await db.prepare(
+    `UPDATE agendamentos SET sinal_status = 'confirmado', sinal_pago = 1, sinal_pago_em = ?2 WHERE id = ?1`
+  ).bind(id, Date.now()).run();
+
+  const cfg = await carregarConfig(db);
+  const servicos = (await db.prepare('SELECT nome, preco_centavos, duracao_min FROM agendamento_servicos WHERE agendamento_id = ?1').bind(id).all()).results || [];
+  const dados = { ...a, servicos };
+
+  const msgWhats = formatarMensagemSinalConfirmado(cfg, dados);
+  let enviado = false;
+  if (a.cliente_whatsapp) {
+    try {
+      await enviarMensagemZap(env, { numero: normalizarWhatsapp(a.cliente_whatsapp), mensagem: msgWhats });
+      enviado = true;
+    } catch (e) {
+      console.error('[WhatsApp] Falha ao enviar confirmação de sinal:', e.message);
+    }
+  }
+
+  return json({ ok: true, enviado, mensagem: msgWhats });
+}, { admin: true });
+
+rota('POST', '/admin/agendamentos/:id/recusar-sinal', async ({ db, env, params }) => {
+  const id = inteiro(params.id, 1, 1e12, 'Id');
+  const a = await db.prepare(
+    `SELECT a.*, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
+     FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id WHERE a.id = ?1`
+  ).bind(id).first();
+  if (!a) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
+
+  await db.prepare(
+    `UPDATE agendamentos SET status = 'cancelado', sinal_status = 'recusado' WHERE id = ?1`
+  ).bind(id).run();
+
+  const cfg = await carregarConfig(db);
+  const servicos = (await db.prepare('SELECT nome, preco_centavos, duracao_min FROM agendamento_servicos WHERE agendamento_id = ?1').bind(id).all()).results || [];
+  const dados = { ...a, servicos };
+
+  const msgWhats = formatarMensagemSinalNaoRecebido(cfg, dados);
+  let enviado = false;
+  if (a.cliente_whatsapp) {
+    try {
+      await enviarMensagemZap(env, { numero: normalizarWhatsapp(a.cliente_whatsapp), mensagem: msgWhats });
+      enviado = true;
+    } catch (e) {
+      console.error('[WhatsApp] Falha ao enviar recusa de sinal:', e.message);
+    }
+  }
+
+  return json({ ok: true, enviado, mensagem: msgWhats });
+}, { admin: true });
+
+rota('POST', '/admin/agendamentos/:id/lembrar-sinal', async ({ db, env, params }) => {
+  const id = inteiro(params.id, 1, 1e12, 'Id');
+  const a = await db.prepare(
+    `SELECT a.*, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
+     FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id WHERE a.id = ?1`
+  ).bind(id).first();
+  if (!a) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
+
+  const cfg = await carregarConfig(db);
+  const servicos = (await db.prepare('SELECT nome, preco_centavos, duracao_min FROM agendamento_servicos WHERE agendamento_id = ?1').bind(id).all()).results || [];
+  const dados = { ...a, servicos };
+
+  const msgWhats = formatarMensagemLembreteSinal(cfg, dados);
+  let enviado = false;
+  if (a.cliente_whatsapp) {
+    try {
+      await enviarMensagemZap(env, { numero: normalizarWhatsapp(a.cliente_whatsapp), mensagem: msgWhats });
+      enviado = true;
+    } catch (e) {
+      console.error('[WhatsApp] Falha ao enviar lembrete de sinal:', e.message);
+    }
+  }
+
+  return json({ ok: true, enviado, mensagem: msgWhats });
+}, { admin: true });
+
 // ---------- clientes ----------
 rota('GET', '/admin/clientes', async ({ db, url }) => {
   const q = (url.searchParams.get('q') || '').trim().toLowerCase();
@@ -523,7 +646,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
   ).bind(agora.data).first();
   const proximaData = proximaRow?.proxima_data || null;
 
-  const [hoje, proximoDia, resumo, receber, sumidos, proximos, canceladosRecentes] = await Promise.all([
+  const [hoje, proximoDia, resumo, receber, sumidos, proximos, canceladosRecentes, sinalPendentes] = await Promise.all([
     listar(db, agora.data, agora.data, `AND a.status != 'cancelado'`),
     proximaData ? listar(db, proximaData, proximaData, `AND a.status != 'cancelado'`) : Promise.resolve([]),
     resumoMes(db, mes),
@@ -536,6 +659,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
     db.prepare(`SELECT COUNT(*) AS n FROM agendamentos WHERE status = 'agendado' AND data > ?1 AND data <= ?2`)
       .bind(agora.data, addDias(agora.data, 7)).first(),
     listar(db, agora.data, addDias(agora.data, 30), `AND a.status = 'cancelado' AND (a.cancelamento_dispensado IS NULL OR a.cancelamento_dispensado = 0)`),
+    listar(db, agora.data, addDias(agora.data, 60), `AND a.status = 'agendado' AND a.sinal_status = 'pendente'`),
   ]);
 
   const faturadoHoje = hoje.filter((a) => a.status === 'concluido').reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
@@ -562,6 +686,8 @@ rota('GET', '/admin/painel', async ({ db }) => {
     alerta_sumidos_dias: diasSumido,
     proximos_7_dias: proximos.n,
     cancelados_recentes: canceladosRecentes,
+    sinal_pendentes: sinalPendentes,
+    sinal_pendentes_qtd: sinalPendentes.length,
   });
 }, { admin: true });
 
