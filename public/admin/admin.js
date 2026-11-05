@@ -4,6 +4,7 @@ import {
   selecionarFaturasVisiveis, classificarEstiloFatura,
 } from '/js/comum.js';
 import { gerarBrCode } from '/js/pix.js';
+import { gerarPdfContratoMinhaAgenda } from '/admin/js/contrato-pdf.js';
 
 const raiz = document.getElementById('raiz');
 const S = {
@@ -488,55 +489,212 @@ function folhaContratoAssinado(contrato) {
     : 'Assinado eletronicamente';
   const telAssinante = contrato.whatsapp_assinante
     ? mascaraWhatsapp(contrato.whatsapp_assinante)
-    : 'WhatsApp cadastrado';
+    : (contrato.assinado_por_whatsapp ? mascaraWhatsapp(contrato.assinado_por_whatsapp) : '(83) 99667-7643');
   const valorFmt = moeda(contrato.valor_mensalidade_centavos || S.licenca?.valor_mensalidade_centavos || 3990);
   const diaVenc = contrato.dia_vencimento || S.licenca?.dia_vencimento || 10;
+  const codigoAutenticidade = contrato.codigo_autenticidade || `CT-2026-${String(contrato.id || '000001').padStart(6, '0')}`;
   const linkPublico = `https://root-sysimperium.pages.dev/contrato/?token=${encodeURIComponent(contrato.token || '')}`;
+
+  let clausulas = null;
+  let contratadaDados = {
+    razao_social: 'SysImperium Soluções Tecnológicas',
+    representante: 'Ian Souza Santos',
+    whatsapp: '(83) 98821-2971',
+    horario_suporte: 'Segunda a sexta das 08:00 às 18:00',
+  };
+
+  if (contrato.snapshot_contrato_json) {
+    try {
+      const snap = typeof contrato.snapshot_contrato_json === 'string'
+        ? JSON.parse(contrato.snapshot_contrato_json)
+        : contrato.snapshot_contrato_json;
+      if (Array.isArray(snap.clausulas) && snap.clausulas.length >= 9) {
+        clausulas = snap.clausulas;
+      }
+      if (snap.contratada?.representante) contratadaDados.representante = snap.contratada.representante;
+      if (snap.contratada?.razao_social || snap.contratada?.nome) contratadaDados.razao_social = snap.contratada.razao_social || snap.contratada.nome;
+      if (snap.dados_contrato?.empresa_representante) contratadaDados.representante = snap.dados_contrato.empresa_representante;
+    } catch (_) {}
+  }
+
+  // Se o snapshot armazenado ainda não tiver o array completo de 9 cláusulas, usa a íntegra oficial
+  if (!clausulas) {
+    clausulas = [
+      {
+        numero: 1,
+        titulo: 'CLÁUSULA 1ª — OBJETO E LICENÇA DE USO',
+        texto: `O presente contrato concede licença pessoal, não exclusiva, intransferível e temporária de utilização da plataforma Minha Agenda, destinada à organização e gestão das atividades de profissionais da área da beleza.
+Contempla:
+• Agendamento online de serviços para clientes via link direto ou bio;
+• Organização e gerenciamento visual da agenda e horários de atendimento;
+• Cadastro detalhado e apresentação de serviços e valores;
+• Controle financeiro diário e relatórios de faturamento;
+• Envio automático de mensagens pelo WhatsApp relacionadas aos agendamentos;
+• Envio automático de mensagens de aniversário carinhosas às clientes;
+• Notificações Web Push no celular da profissional sobre novos agendamentos e cancelamentos.
+As funcionalidades poderão receber atualizações, melhorias, modificações ou novas ferramentas ao longo do tempo. A contratação representa exclusivamente uma licença de utilização de software como serviço (SaaS), e não a aquisição de propriedade do software. A licença permanece válida enquanto a assinatura estiver ativa e regular.`,
+      },
+      {
+        numero: 2,
+        titulo: 'CLÁUSULA 2ª — VALOR E PAGAMENTO',
+        texto: `Pelos serviços de licenciamento, infraestrutura e suporte contínuo da plataforma Minha Agenda, a CONTRATANTE pagará o valor de adesão de R$ 39,99 e o valor mensal de ${valorFmt}.
+Regras de cobrança:
+• O valor da adesão é de R$ 39,99;
+• A cobrança tem início no mês da assinatura eletrônica deste contrato;
+• A primeira mensalidade deverá ser quitada até o dia 30 do mês da contratação (ou no último dia do mês quando o mês não possuir dia 30);
+• As mensalidades subsequentes terão vencimento todo dia ${diaVenc} de cada mês;
+• O pagamento poderá ser realizado via Pix através de chave estática/QR Code disponibilizado no painel;
+• Haverá tolerância de 5 (cinco) dias corridos após o vencimento;
+• Durante o período de tolerância, o aplicativo apresentará aviso visual de mensalidade pendente;
+• No sexto dia após o vencimento, caso não haja a identificação do pagamento, o sistema bloqueará o acesso às áreas administrativas e de agendamento da plataforma;
+• O acesso será restabelecido imediatamente após a identificação e regularização do pagamento;
+• Qualquer reajuste futuro deverá ser comunicado à CONTRATANTE com antecedência mínima de 30 (trinta) dias.`,
+      },
+      {
+        numero: 3,
+        titulo: 'CLÁUSULA 3ª — SEM FIDELIDADE E CANCELAMENTO LIVRE',
+        texto: `Não haverá carência, fidelidade mínima, multa rescisória ou taxa de cancelamento.
+A CONTRATANTE poderá solicitar o cancelamento a qualquer momento através dos canais oficiais de atendimento.
+O cancelamento interromperá imediatamente as cobranças futuras, sem eliminar valores eventualmente já vencidos ou referentes ao período regularmente utilizado, em estrita consonância com a legislação aplicável.`,
+      },
+      {
+        numero: 4,
+        titulo: 'CLÁUSULA 4ª — SUPORTE E DISPONIBILIDADE',
+        texto: `O suporte técnico da plataforma será prestado durante o horário comercial (Segunda a Sexta-feira, das 08h às 18h).
+Solicitações recebidas durante esse período terão atendimento no mesmo dia, respeitando a ordem cronológica de abertura e a complexidade técnica do chamado.
+Solicitações enviadas fora do horário comercial serão atendidas no próximo dia útil subsequente.
+A CONTRATADA (${contratadaDados.razao_social}) adotará as melhores medidas técnicas e administrativas razoáveis para assegurar estabilidade, alta disponibilidade e segurança na nuvem, incluindo rotinas periódicas de backup.
+A CONTRATANTE reconhece que notificações, integrações externas e mensagens automáticas dependem também da conectividade de internet, configurações de aparelhos e disponibilidade operacional dos provedores terceiros (como WhatsApp/Meta).`,
+      },
+      {
+        numero: 5,
+        titulo: 'CLÁUSULA 5ª — ASSINATURA ELETRÔNICA E VALIDADE JURÍDICA',
+        texto: `As partes reconhecem a plena validade jurídica e eficácia probatória da manifestação eletrônica de vontade, confirmada mediante validação por código OTP enviado ao número de WhatsApp previamente cadastrado.
+Não é exigida assinatura manuscrita nem o envio de documentos físicos pessoais para essa finalidade.
+O sistema registrará de forma imutável:
+• Nome da profissional (Jerusa Beauty) e estabelecimento (Jerusa Beauty);
+• Número de WhatsApp utilizado na confirmação (${telAssinante});
+• Data e horário exatos registrados no servidor no momento do aceite;
+• Código único e exclusivo de autenticidade (${codigoAutenticidade});
+• Versão exata e integral do contrato aceito;
+• Hash de integridade criptográfica SHA-256 do documento.
+Fundamentação legal: art. 10, § 2º, da Medida Provisória nº 2.200-2/2001 e disposições da Lei Federal nº 14.063/2020.`,
+      },
+      {
+        numero: 6,
+        titulo: 'CLÁUSULA 6ª — PROPRIEDADE INTELECTUAL',
+        texto: `O software Minha Agenda, seus algoritmos, código-fonte, arquitetura, design visual, identidade de marca e elementos tecnológicos pertencem exclusivamente à CONTRATADA (${contratadaDados.razao_social}) ou a seus respectivos titulares.
+A CONTRATANTE recebe tão somente a licença de uso temporário do sistema, sendo expressamente vedada qualquer tentativa de engenharia reversa, cópia, sublicenciamento, comercialização ou exploração não autorizada.`,
+      },
+      {
+        numero: 7,
+        titulo: 'CLÁUSULA 7ª — PROTEÇÃO DE DADOS (LGPD)',
+        texto: `As partes declaram estrita observância à Lei Geral de Proteção de Dados Pessoais (Lei Federal nº 13.709/2018 - LGPD).
+A CONTRATANTE atua como controladora dos dados cadastrais de suas clientes finais, responsabilizando-se pela legitimidade e finalidade de sua coleta.
+A CONTRATADA atua como operadora dos dados na medida estritamente necessária ao funcionamento da plataforma, aplicando medidas rigorosas de confidencialidade, segurança e controle de acesso.`,
+      },
+      {
+        numero: 8,
+        titulo: 'CLÁUSULA 8ª — ENCERRAMENTO E DISPONIBILIZAÇÃO DE DADOS',
+        texto: `Em caso de encerramento do contrato, a CONTRATANTE poderá solicitar a disponibilização e exportação dos dados cadastrais de suas clientes em formato acessível e estruturado (planilha/arquivo digital).
+A CONTRATADA manterá rotinas de retenção, expurgo ou anonimização de dados estritamente em conformidade com as obrigações legais, regulatórias e com a LGPD.`,
+      },
+      {
+        numero: 9,
+        titulo: 'CLÁUSULA 9ª — DISPOSIÇÕES GERAIS',
+        texto: `A CONTRATANTE declara ter tido acesso prévio à íntegra deste contrato, oportunidade plena de conhecer e esclarecer suas condições, concordando voluntariamente com todos os seus termos.
+Este contrato entra em vigor imediatamente após a confirmação do código eletrônico via WhatsApp.
+Quaisquer atualizações substanciais das condições contratuais serão previamente informadas com no mínimo 30 dias de antecedência, resguardados todos os direitos adquiridos pela CONTRATANTE.`,
+      },
+    ];
+  }
 
   folha(`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px">
-      <h2 style="margin:0;font-size:1.15rem">📜 Contrato de Prestação de Serviços</h2>
-      <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado</span>
+      <h2 style="margin:0;font-size:1.15rem">📜 Contrato Digital Minha Agenda</h2>
+      <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado Digitalmente</span>
     </div>
     <p class="sub-texto" style="margin-top:0">SysImperium Soluções Tecnológicas & Jerusa Beauty</p>
 
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.82rem;color:#166534">
-      <div style="font-weight:700;margin-bottom:4px">Assinatura Digital Autenticada</div>
+      <div style="font-weight:700;margin-bottom:4px">Certificado de Assinatura Eletrônica</div>
+      <div>• Status: <strong>ASSINADO DIGITALMENTE E EM VIGÊNCIA</strong></div>
       <div>• Assinado via WhatsApp: <strong>${esc(telAssinante)}</strong></div>
-      <div>• Data / Horário: <strong>${esc(dataAssinatura)}</strong></div>
-      <div>• Código de Autenticidade: <code style="font-size:0.75rem;background:#dcfce7;padding:1px 5px;border-radius:4px">${esc(contrato.token || 'AUTENTICADO')}</code></div>
+      <div>• Data / Horário do Servidor: <strong>${esc(dataAssinatura)}</strong></div>
+      <div>• Código de Autenticidade: <code style="font-size:0.78rem;background:#dcfce7;padding:2px 6px;border-radius:4px;font-weight:700">${esc(codigoAutenticidade)}</code></div>
+      ${contrato.hash_sha256 ? `<div style="font-size:0.72rem;margin-top:3px;color:#15803d">• Hash SHA-256: <code>${esc(contrato.hash_sha256)}</code></div>` : ''}
+      <div style="font-size:0.72rem;color:#166534;margin-top:4px">Validade jurídica nos termos do art. 10, § 2º da MP 2.200-2/2001 e Lei 14.063/2020.</div>
     </div>
 
-    <div style="max-height:300px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;font-size:0.83rem;line-height:1.55;color:#334155">
-      <p style="margin-top:0"><strong>PARTES:</strong><br>
-      <strong>CONTRATADA:</strong> SysImperium Soluções Tecnológicas (representada por Ian Victor de Oliveira Souza).<br>
-      <strong>CONTRATANTE:</strong> Jerusa Beauty, através de sua titular cadastrada.</p>
+    <div style="max-height:360px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;font-size:0.82rem;line-height:1.55;color:#334155">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:0.8rem">
+        <strong style="color:#0f172a;display:block;margin-bottom:6px">IDENTIFICAÇÃO DAS PARTES CONTRATANTES:</strong>
+        <div><strong>CONTRATADA:</strong> ${esc(contratadaDados.razao_social)} (Representante: <strong>${esc(contratadaDados.representante)}</strong> · Contato: ${esc(contratadaDados.whatsapp)})</div>
+        <div style="margin-top:4px"><strong>CONTRATANTE:</strong> Jerusa Beauty (Estabelecimento cadastrado · WhatsApp: <strong>${esc(telAssinante)}</strong>)</div>
+        <div style="margin-top:4px"><strong>VALOR & CONDIÇÃO:</strong> Adesão: <strong>R$ 39,99</strong> · Mensalidade: <strong>${valorFmt}/mês</strong> · Vencimento todo dia <strong>${diaVenc}</strong> · <strong>SEM CARÊNCIA NEM MULTA PARA CANCELAMENTO</strong></div>
+      </div>
 
-      <p><strong>CLÁUSULA 1ª — OBJETO DO CONTRATO:</strong><br>
-      Concessão de licença de uso do software SaaS SysImperium para agendamento online de clientes, gestão de atendimentos, catálogo de serviços e controle financeiro diário.</p>
-
-      <p><strong>CLÁUSULA 2ª — VALOR DA MENSALIDADE:</strong><br>
-      Pelos serviços, hospedagem em nuvem e suporte técnico contínuo, a CONTRATANTE pagará o valor mensal de <strong>${valorFmt}/mês</strong>, com vencimento todo <strong>dia ${diaVenc}</strong> de cada mês subsequente, via Pix.</p>
-
-      <p style="background:#fefce8;border-left:3px solid #eab308;padding:8px;border-radius:4px;color:#854d0e"><strong>CLÁUSULA 3ª — SEM CARÊNCIA NEM FIDELIDADE (CANCELAMENTO LIVRE):</strong><br>
-      <strong>O presente contrato NÃO possui carência nem cláusula de fidelidade mínima para término.</strong> A CONTRATANTE tem total liberdade para solicitar o encerramento do serviço a qualquer momento, sem qualquer tipo de multa rescisória, taxa de cancelamento ou aviso prévio obrigatório.</p>
-
-      <p><strong>CLÁUSULA 4ª — SUPORTE E DISPONIBILIDADE:</strong><br>
-      A SysImperium compromete-se com a segurança da infraestrutura, estabilidade do servidor em nuvem, backup de dados das clientes e suporte técnico prioritário via WhatsApp.</p>
-
-      <p style="margin-bottom:0"><strong>CLÁUSULA 5ª — VALIDADE JURÍDICA DA ASSINATURA:</strong><br>
-      As partes concordam que a concordância eletrônica vinculada ao número de WhatsApp cadastrado possui plena validade jurídica e probatória, conforme art. 10 da MP 2.200-2/2001 e Lei Federal nº 14.063/2020.</p>
+      ${clausulas.map((c) => `
+        <div style="margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #e2e8f0">
+          <strong style="color:#0f172a;font-size:0.84rem;display:block;margin-bottom:4px">${esc(c.titulo)}</strong>
+          <div style="color:#475569;white-space:pre-line;font-size:0.8rem;line-height:1.5">${esc(c.texto)}</div>
+        </div>
+      `).join('')}
     </div>
 
-    <div class="acoes" style="display:flex;gap:8px">
-      <button class="botao sec" id="btn-copiar-link-contrato" type="button" style="flex:1">Copiar Link do Contrato</button>
-      <button class="botao" id="btn-fechar-contrato" type="button" style="flex:1">Fechar</button>
+    <div class="acoes" style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:8px">
+        <button class="botao" id="btn-baixar-pdf-ajustes" type="button" style="flex:1">📄 Baixar PDF Oficial</button>
+        <button class="botao sec" id="btn-copiar-link-contrato" type="button" style="flex:1">📋 Copiar Link</button>
+      </div>
+      <button class="botao sec" id="btn-fechar-contrato" type="button">Fechar</button>
     </div>
   `, (f) => {
     f.querySelector('#btn-fechar-contrato')?.addEventListener('click', () => fecharFolha());
     f.querySelector('#btn-copiar-link-contrato')?.addEventListener('click', async () => {
       const ok = await copiar(linkPublico);
       aviso(ok ? 'Link do contrato copiado com sucesso!' : 'Não foi possível copiar o link', !ok);
+    });
+    f.querySelector('#btn-baixar-pdf-ajustes')?.addEventListener('click', async (e) => {
+      const btn = e.target;
+      const textoOrig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Gerando PDF...';
+      try {
+        let dadosContrato = null;
+        if (contrato.snapshot_contrato_json) {
+          try {
+            dadosContrato = typeof contrato.snapshot_contrato_json === 'string'
+              ? JSON.parse(contrato.snapshot_contrato_json)
+              : contrato.snapshot_contrato_json;
+          } catch (_) {}
+        }
+        if (!dadosContrato || !dadosContrato.clausulas) {
+          dadosContrato = {
+            codigo_autenticidade: codigoAutenticidade,
+            partes: {
+              contratada: contratadaDados,
+              contratante: { nome: 'Jerusa Beauty', estabelecimento: 'Jerusa Beauty', whatsapp: telAssinante }
+            },
+            nome_cliente: 'Jerusa Beauty',
+            nome_estabelecimento: 'Jerusa Beauty',
+            whatsapp: telAssinante,
+            valor_mensalidade_centavos: contrato.valor_mensalidade_centavos || 3990,
+            dia_vencimento: diaVenc,
+            assinado_em: contrato.assinado_em,
+            assinado_por_whatsapp: telAssinante,
+            hash_sha256: contrato.hash_sha256,
+            clausulas,
+          };
+        }
+        gerarPdfContratoMinhaAgenda(dadosContrato);
+        aviso('PDF baixado com sucesso!');
+      } catch (err) {
+        aviso('Erro ao gerar PDF: ' + err.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = textoOrig;
+      }
     });
   });
 }
@@ -1880,21 +2038,25 @@ async function telaAjustes() {
       <div class="acoes">${(S.licenca?.tipo_placom === 'demonstracao') ? '<span class="suave pequeno" style="display:block;margin-bottom:6px">A troca de senha estará disponível após a ativação do placom mensal.</span>' : '<button class="botao sec" id="trocar" type="button">Trocar senha</button>'}<button class="botao sec" id="sair" type="button">Sair</button></div></section>
 
     ${(S.licenca?.contrato?.status === 'assinado') ? `
-    <section class="secao" id="secao-contrato-digital"><h2>📜 Contrato Digital de Adesão</h2>
-      <p class="sub-texto">Termos de prestação de serviços e licença de uso do software.</p>
+    <section class="secao" id="secao-contrato-digital"><h2>📜 Contrato Digital de Licença de Uso</h2>
+      <p class="sub-texto">Licença de software sem carência ou fidelidade, confirmada eletronicamente.</p>
       <div class="cartao" style="background:#f8fafc;border:1px solid #cbd5e1;padding:14px;border-radius:12px;margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">
           <strong style="color:#0f172a">Contrato SysImperium & Jerusa Beauty</strong>
-          <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600">✓ Assinado Digitalmente</span>
+          <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado Digitalmente</span>
         </div>
-        <div class="suave pequeno" style="line-height:1.55">
-          • Mensalidade: <strong>${moeda(S.licenca.contrato.valor_mensalidade_centavos || S.licenca.valor_mensalidade_centavos || 3990)}/mês</strong><br>
-          • Carência / Fidelidade: <strong>Sem carência nem multa para término (cancelamento livre)</strong><br>
+        <div class="suave pequeno" style="line-height:1.6">
+          • Código de Autenticidade: <strong>${esc(S.licenca.contrato.codigo_autenticidade || 'CT-2026-000001')}</strong><br>
+          • Valor da Adesão: <strong>R$ 39,99</strong><br>
+          • Mensalidade: <strong>${moeda(S.licenca.contrato.valor_mensalidade_centavos || S.licenca.valor_mensalidade_centavos || 3990)}/mês</strong> (vencimento todo dia <strong>${S.licenca.contrato.dia_vencimento || S.licenca.dia_vencimento || 10}</strong>)<br>
+          • Carência / Fidelidade: <strong>Sem carência nem multa rescisória (cancelamento livre a qualquer momento)</strong><br>
+          • Representante Legal: <strong>Ian Souza Santos</strong><br>
           • Assinado em: <strong>${S.licenca.contrato.assinado_em ? new Date(S.licenca.contrato.assinado_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'Vigente'}</strong>
         </div>
       </div>
-      <div class="acoes">
-        <button class="botao sec" id="btn-ver-contrato-ajustes" type="button" style="width:100%">Visualizar Contrato Completo</button>
+      <div class="acoes duas">
+        <button class="botao sec" id="btn-ver-contrato-ajustes" type="button" style="width:100%">Visualizar Contrato Completo (9 Cláusulas)</button>
+        <button class="botao" id="btn-atalho-pdf-ajustes" type="button" style="width:100%">📄 Baixar PDF</button>
       </div>
     </section>` : ''}`;
 
@@ -2010,6 +2172,44 @@ async function telaAjustes() {
   $('#novo-bloq').addEventListener('click', () => folhaBloquear(S.hoje, telaAjustes));
   $('#btn-ajustes-mensalidades')?.addEventListener('click', () => folhaMensalidades());
   $('#btn-ver-contrato-ajustes')?.addEventListener('click', () => folhaContratoAssinado(S.licenca?.contrato));
+  $('#btn-atalho-pdf-ajustes')?.addEventListener('click', async () => {
+    const lic = S.licenca;
+    if (!lic?.contrato) return;
+    try {
+      let dadosContrato = null;
+      if (lic.contrato.snapshot_contrato_json) {
+        try {
+          dadosContrato = typeof lic.contrato.snapshot_contrato_json === 'string'
+            ? JSON.parse(lic.contrato.snapshot_contrato_json)
+            : lic.contrato.snapshot_contrato_json;
+        } catch (_) {}
+      }
+      if (!dadosContrato || !dadosContrato.clausulas) {
+        const res = await fetch(`https://root-sysimperium.pages.dev/api/contrato/dados?token=${encodeURIComponent(lic.contrato.token || '')}`).then(r => r.json()).catch(() => null);
+        if (res?.sucesso || res?.contrato || res?.clausulas) dadosContrato = res;
+      }
+      if (!dadosContrato) {
+        dadosContrato = {
+          codigo_autenticidade: lic.contrato.codigo_autenticidade || 'CT-2026-000001',
+          partes: {
+            contratada: { razao_social: 'SysImperium Soluções Tecnológicas', representante: 'Ian Souza Santos', whatsapp: '(83) 98821-2971' },
+            contratante: { nome: 'Jerusa Beauty', estabelecimento: 'Jerusa Beauty', whatsapp: lic.contrato.assinado_por_whatsapp || '(83) 99667-7643' }
+          },
+          nome_cliente: 'Jerusa Beauty',
+          nome_estabelecimento: 'Jerusa Beauty',
+          valor_mensalidade_centavos: lic.contrato.valor_mensalidade_centavos || 3990,
+          dia_vencimento: lic.contrato.dia_vencimento || 10,
+          assinado_em: lic.contrato.assinado_em,
+          assinado_por_whatsapp: lic.contrato.assinado_por_whatsapp,
+          hash_sha256: lic.contrato.hash_sha256,
+        };
+      }
+      gerarPdfContratoMinhaAgenda(dadosContrato);
+      aviso('PDF baixado com sucesso!');
+    } catch (err) {
+      aviso('Erro ao gerar PDF: ' + err.message, true);
+    }
+  });
   $('#sair').addEventListener('click', async () => {
     if (intervaloDemo) clearInterval(intervaloDemo);
     try {
