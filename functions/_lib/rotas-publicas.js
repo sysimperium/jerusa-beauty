@@ -50,6 +50,13 @@ rota('GET', '/publico/config', async ({ db }) => {
     janela_dias: cfg.janela_dias,
     dias_expediente_texto: diasTexto,
     servicos: results,
+    sinal_ativo: !!cfg.sinal_ativo,
+    sinal_porcentagem: cfg.sinal_porcentagem || 30,
+    sinal_prazo_horas: cfg.sinal_prazo_horas || 2,
+    pix_chave: cfg.pix_chave || '',
+    pix_tipo: cfg.pix_tipo || 'telefone',
+    pix_nome: cfg.pix_nome || '',
+    pix_cidade: cfg.pix_cidade || '',
   }, 200, { 'cache-control': 'no-store' });
 });
 
@@ -117,6 +124,11 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
     }
   }
 
+  const temSinal = !!(cfg.sinal_ativo && cfg.pix_chave && cfg.pix_chave.trim());
+  const sinalPorcentagem = temSinal ? (cfg.sinal_porcentagem || 30) : 0;
+  const sinalValorCentavos = temSinal ? Math.round((preco * sinalPorcentagem) / 100) : 0;
+  const sinalStatus = temSinal ? 'pendente' : 'nenhum';
+
   const clienteId = await upsertCliente(db, {
     nome,
     whatsapp,
@@ -128,6 +140,9 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
   const ok = await criarAgendamento(db, cfg, {
     cliente_id: clienteId, data: corpo.data, inicio_min: inicio, duracao_min: duracao, local,
     endereco, referencia, preco, token, origem: 'cliente', servicos,
+    sinal_status: sinalStatus,
+    sinal_porcentagem: sinalPorcentagem,
+    sinal_valor_centavos: sinalValorCentavos,
   });
   if (!ok) throw erro(409, 'horario_indisponivel', 'Esse horário acabou de ser ocupado. Escolha outro.');
 
@@ -145,6 +160,9 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
       criado_por_admin: false,
       token,
       link: linkAgendamento,
+      sinal_status: sinalStatus,
+      sinal_porcentagem: sinalPorcentagem,
+      sinal_valor_centavos: sinalValorCentavos,
     });
   } catch (err) {
     console.error('Falha ao enviar notificação WhatsApp:', err);
@@ -167,14 +185,15 @@ rota('POST', '/publico/agendar', async ({ db, env, corpo, url, waitUntil }) => {
     console.error('Falha ao enviar notificação Web Push:', err);
   }
 
-  return json({ token }, 201);
+  return json({ token, sinal_status: sinalStatus, sinal_porcentagem: sinalPorcentagem, sinal_valor_centavos: sinalValorCentavos }, 201);
 });
 
 async function buscarPorToken(db, token) {
   if (!/^[a-f0-9]{32}$/.test(token)) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
   const a = await db.prepare(
     `SELECT a.id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco, a.referencia, a.preco_tabela_centavos,
-            a.status, c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
+            a.status, a.sinal_status, a.sinal_porcentagem, a.sinal_valor_centavos, a.sinal_pago, a.sinal_pago_em, a.criado_em,
+            c.nome AS cliente_nome, c.whatsapp AS cliente_whatsapp
      FROM agendamentos a JOIN clientes c ON c.id = a.cliente_id WHERE a.token = ?1`).bind(token).first();
   if (!a) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
   const { results } = await db.prepare(
@@ -190,7 +209,18 @@ rota('GET', '/publico/agendamento/:token', async ({ db, params }) => {
   const cfg = await carregarConfig(db);
   const a = await buscarPorToken(db, params.token);
   const { id, ...resto } = a;
-  return json({ ...resto, pode_cancelar: podeCancelar(a, cfg), cancelar_horas: cfg.cancelar_horas, whatsapp: cfg.whatsapp, nome_negocio: cfg.nome_negocio });
+  return json({
+    ...resto,
+    pode_cancelar: podeCancelar(a, cfg),
+    cancelar_horas: cfg.cancelar_horas,
+    whatsapp: cfg.whatsapp,
+    nome_negocio: cfg.nome_negocio,
+    sinal_prazo_horas: cfg.sinal_prazo_horas || 2,
+    pix_chave: cfg.pix_chave || '',
+    pix_tipo: cfg.pix_tipo || 'telefone',
+    pix_nome: cfg.pix_nome || '',
+    pix_cidade: cfg.pix_cidade || '',
+  });
 });
 
 rota('POST', '/publico/agendamento/:token/cancelar', async ({ db, env, params, waitUntil }) => {
