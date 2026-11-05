@@ -1588,18 +1588,12 @@ async function telaAgenda() {
   conteudo().innerHTML = `
     <header class="cabeca">
       <div><h1 class="assinatura">Agenda</h1><p>${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''} · ${agendados.length} a atender · ${concluidos.length} já atendido(s)</p></div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <button class="icone-btn" id="btn-config-sinal" type="button" title="Configurações do Sinal" style="display:flex;align-items:center;gap:6px;font-size:0.8rem;padding:6px 12px;border-radius:12px;background:var(--marfim);border:1px solid var(--linha)">
-          <span>⚙️ Sinal</span>
-          ${S.config?.sinal_ativo ? '<span class="ponto-status ok"></span>' : ''}
+      ${(S.licenca && !S.licenca.isento_mensalidade) ? `
+        <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
+          <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
+          <span>Mensalidade</span>
         </button>
-        ${(S.licenca && !S.licenca.isento_mensalidade) ? `
-          <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
-            <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
-            <span>Mensalidade</span>
-          </button>
-        ` : ''}
-      </div>
+      ` : ''}
     </header>
     <div class="nav-data">
       <button class="icone-btn" id="ant" aria-label="Dia anterior">${icone('esq')}</button>
@@ -1705,7 +1699,6 @@ async function telaAgenda() {
   });
 
   ligarAtendimentos(lista, telaAgenda);
-  conteudo().querySelector('#btn-config-sinal')?.addEventListener('click', () => folhaConfigSinal(telaAgenda));
   conteudo().querySelector('#btn-mensalidade-agenda')?.addEventListener('click', () => folhaMensalidades());
   conteudo().querySelector('#atalho-ver-cancelados')?.addEventListener('click', () => {
     const btnOutros = conteudo().querySelector('#filtro-agenda [data-filtro="outros"]');
@@ -2376,6 +2369,50 @@ async function telaAjustes() {
       <div class="campo"><label for="c-pnome">Nome que aparece para quem paga</label><input id="c-pnome" maxlength="25" value="${esc(cfg.pix_nome)}" placeholder="Como está com banco (opcional)"></div>
       <div class="campo"><label for="c-pcid">Cidade</label><input id="c-pcid" maxlength="15" value="${esc(cfg.pix_cidade)}" placeholder="Cidade (opcional)"></div></section>
 
+    <section class="secao" id="secao-sinal">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <h2>Cobrança de Sinal (Reserva de Horário)</h2>
+        ${cfg.sinal_ativo ? '<span class="selo-texto ok">✓ Ativo</span>' : '<span class="selo-texto suave">Desativado</span>'}
+      </div>
+      <p class="sub-texto">Evite que clientes marquem e não compareçam cobrando uma porcentagem de sinal via Pix para confirmar a reserva.</p>
+
+      <label class="interruptor" style="margin-top:8px">
+        <span><strong>Cobrar sinal para reservar horário</strong><br>
+        <span class="suave pequeno">O horário fica reservado aguardando envio do comprovante Pix pela cliente.</span></span>
+        <input type="checkbox" id="c-sinal-ativo" ${cfg.sinal_ativo ? 'checked' : ''}>
+        <span class="trilho"></span>
+      </label>
+
+      <div id="bloco-opcoes-sinal" style="${cfg.sinal_ativo ? '' : 'display:none;'}margin-top:14px;display:flex;flex-direction:column;gap:12px">
+        <div class="campo">
+          <label>Porcentagem do sinal (% sobre o valor do serviço)</label>
+          <div class="segmentos" id="pills-ajustes-sinal-pct" style="margin-bottom:8px">
+            ${[20, 30, 40, 50].map((v) => `<button type="button" class="pill-ajustes-pct" data-val="${v}" aria-pressed="${(cfg.sinal_porcentagem || 30) === v}">${v}%</button>`).join('')}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="c-sinal-pct" min="1" max="100" value="${cfg.sinal_porcentagem || 30}" style="max-width:120px">
+            <span class="suave">% do valor total</span>
+          </div>
+        </div>
+
+        <div class="campo">
+          <label for="c-sinal-prazo">Tolerância para receber comprovante (horas)</label>
+          <div class="segmentos" id="pills-ajustes-sinal-prazo" style="margin-bottom:8px">
+            ${[1, 2, 3, 4].map((h) => `<button type="button" class="pill-ajustes-prazo" data-val="${h}" aria-pressed="${(cfg.sinal_prazo_horas || 2) === h}">${h}h</button>`).join('')}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="c-sinal-prazo" min="1" max="48" value="${cfg.sinal_prazo_horas || 2}" style="max-width:120px">
+            <span class="suave">horas de tolerância</span>
+          </div>
+          <span class="dica">Após este prazo, um alerta em vermelho sugerindo liberar o horário aparecerá na agenda e no painel.</span>
+        </div>
+
+        <div style="background:var(--marfim);border:1px solid var(--linha);border-radius:10px;padding:12px;font-size:0.85rem;color:var(--suave)">
+          ℹ️ O Pix Copia e Cola e o QR Code serão gerados automaticamente para a cliente com o <strong>valor exato do sinal</strong>, utilizando a Chave Pix cadastrada logo acima.
+        </div>
+      </div>
+    </section>
+
     <section class="secao" id="secao-push">
       <h2>Notificações com Celular (Web Push)</h2>
       <p class="sub-texto">Receba alertas sonoros com celular assim que uma cliente agendar ou desmarcar um horário pelo site.</p>
@@ -2528,6 +2565,35 @@ async function telaAjustes() {
   c.querySelectorAll('#c-tipo button').forEach((b) => b.addEventListener('click', () => { tipo = b.dataset.t; c.querySelectorAll('#c-tipo button').forEach((x) => x.setAttribute('aria-pressed', x === b)); }));
   c.querySelectorAll('.expediente-linha').forEach((l) => l.querySelector('.e-ativo').addEventListener('change', (e) => { l.querySelector('.horas-campos').hidden = !e.target.checked; }));
 
+  const chkSinal = $('#c-sinal-ativo');
+  const blocoSinal = $('#bloco-opcoes-sinal');
+  const inpSinalPct = $('#c-sinal-pct');
+  const inpSinalPrazo = $('#c-sinal-prazo');
+
+  if (chkSinal && blocoSinal) {
+    chkSinal.addEventListener('change', () => {
+      blocoSinal.style.display = chkSinal.checked ? 'flex' : 'none';
+      if (chkSinal.checked && !$('#c-chave').value.trim()) {
+        aviso('Atenção: Para cobrar sinal, preencha a Chave Pix acima!', true);
+        $('#c-chave').focus();
+      }
+    });
+  }
+
+  c.querySelectorAll('.pill-ajustes-pct').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (inpSinalPct) inpSinalPct.value = btn.dataset.val;
+      c.querySelectorAll('.pill-ajustes-pct').forEach((b) => b.setAttribute('aria-pressed', b === btn));
+    });
+  });
+
+  c.querySelectorAll('.pill-ajustes-prazo').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (inpSinalPrazo) inpSinalPrazo.value = btn.dataset.val;
+      c.querySelectorAll('.pill-ajustes-prazo').forEach((b) => b.setAttribute('aria-pressed', b === btn));
+    });
+  });
+
   const salvarAjustesGerais = async (btn) => {
     if (btn) btn.disabled = true;
     try {
@@ -2553,14 +2619,18 @@ async function telaAjustes() {
         pix_chave: $('#c-chave').value,
         pix_nome: $('#c-pnome').value,
         pix_cidade: $('#c-pcid').value,
+        sinal_ativo: $('#c-sinal-ativo') ? $('#c-sinal-ativo').checked : false,
+        sinal_porcentagem: $('#c-sinal-pct') ? Number($('#c-sinal-pct').value) || 30 : 30,
+        sinal_prazo_horas: $('#c-sinal-prazo') ? Number($('#c-sinal-prazo').value) || 2 : 2,
       };
-      for (const k of ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias']) corpo[k] = Number(corpo[k]);
+      for (const k of ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias', 'sinal_porcentagem', 'sinal_prazo_horas']) corpo[k] = Number(corpo[k]);
       const r2 = await seguro(() => api('/admin/config', { metodo: 'PUT', corpo }));
       if (r2) {
         S.config = r2.config;
         if (typeof cfg !== 'undefined') cfg = r2.config;
         logoCustomizada = r2.config.logo_customizada || '';
         aviso('Ajustes salvos com sucesso!');
+        telaAjustes();
       }
     } finally {
       if (btn) btn.disabled = false;
