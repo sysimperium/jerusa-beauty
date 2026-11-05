@@ -1,7 +1,8 @@
 import {
   esc, moeda, duracao, hora, dataLonga, dataCurta, diaSemanaCurto, diaDoMes, mesNome, api, aviso, copiar, SELO_SVG,
-  mascaraWhatsapp, linkWhatsapp, confirmar, ajustarExclusividadeServicos,
+  mascaraWhatsapp, linkWhatsapp, confirmar, ajustarExclusividadeServicos, qrSvg,
 } from './comum.js';
+import { gerarBrCode } from './pix.js';
 
 const app = document.getElementById('app');
 const GUARDA = 'jussara.cliente';
@@ -302,20 +303,68 @@ function resumoAgendamento(a) {
 }
 
 function telaPronto(token, a) {
-  const msg = `Olá! Acabei de marcar pelo link:\n${a.servicos.map((s) => s.nome).join(' + ')}\n${dataLonga(a.data)}, ${hora(a.inicio_min)} (${nomeLocal(a.local).toLowerCase()}).\nNome: ${a.cliente_nome}`;
+  const total = a.preco_tabela_centavos || a.servicos.reduce((s, x) => s + x.preco_centavos, 0);
+  const temSinalPendente = a.sinal_status === 'pendente' && ((a.sinal_valor_centavos || 0) > 0);
+  const sinalCentavos = a.sinal_valor_centavos || 0;
+  const saldoCentavos = Math.max(0, total - sinalCentavos);
+
+  let codigoPix = '';
+  if (temSinalPendente && (a.pix_chave || S.cfg?.pix_chave)) {
+    try {
+      codigoPix = gerarBrCode({
+        tipo: a.pix_tipo || S.cfg?.pix_tipo || 'telefone',
+        chave: a.pix_chave || S.cfg?.pix_chave,
+        nome: a.pix_nome || S.cfg?.pix_nome || a.nome_negocio || 'Jerusa Beauty',
+        cidade: a.pix_cidade || S.cfg?.pix_cidade || 'Joao Pessoa',
+        valorCentavos: sinalCentavos,
+      });
+    } catch (e) {
+      console.warn('Erro ao gerar código Pix:', e.message);
+    }
+  }
+
+  const msgPadrao = `Olá! Acabei de marcar pelo link:\n${a.servicos.map((s) => s.nome).join(' + ')}\n${dataLonga(a.data)}, ${hora(a.inicio_min)} (${nomeLocal(a.local).toLowerCase()}).\nNome: ${a.cliente_nome}`;
+  const msgComprovante = `Olá, Jerusa! ✨ Acabei de fazer uma reserva para ${dataLonga(a.data)} às ${hora(a.inicio_min)} (${a.servicos.map((s) => s.nome).join(' + ')}).\n\nSegue o comprovante do sinal de ${moeda(sinalCentavos)} para confirmação! Nome: ${a.cliente_nome}`;
+  const msgZap = temSinalPendente ? msgComprovante : msgPadrao;
+
   iniciar(`
-    <header class="marca" style="padding-top:0">${SELO_SVG}<h1 class="assinatura" style="margin-top:14px">Horário reservado</h1>
-      <p>${esc(a.cliente_nome.split(' ')[0])}, seu horário está marcado. A manicure confirma com você pelo WhatsApp.</p></header>
+    <header class="marca" style="padding-top:0">${SELO_SVG}
+      <h1 class="assinatura" style="margin-top:14px">${temSinalPendente ? 'Horário pré-reservado' : 'Horário reservado'}</h1>
+      <p>${esc(a.cliente_nome.split(' ')[0])}, seu horário está ${temSinalPendente ? 'pré-reservado' : 'marcado'}. ${temSinalPendente ? `Envie o comprovante do sinal de <strong>${moeda(sinalCentavos)}</strong> em até ${a.sinal_prazo_horas || 2} horas para confirmar.` : 'A manicure confirma com você pelo WhatsApp.'}</p>
+    </header>
+
+    ${temSinalPendente ? `
+      <div style="background:var(--marfim, #fcfbf9);border:1.5px solid var(--ouro-medio, #d4af37);border-radius:16px;padding:16px;margin:16px 0;text-align:center">
+        <span class="selo-texto atencao" style="background:#fef3c7;color:#b45309;padding:4px 10px;border-radius:20px;font-weight:600;font-size:0.82rem">⏳ Sinal para confirmação: ${a.sinal_porcentagem || 30}%</span>
+        <div style="font-size:1.4rem;font-weight:700;margin:10px 0 4px;color:var(--tinta)">${moeda(sinalCentavos)}</div>
+        <p class="suave pequeno" style="margin-bottom:12px">Total dos serviços: ${moeda(total)} · Saldo no atendimento: ${moeda(saldoCentavos)}</p>
+
+        ${codigoPix ? `
+          <div class="qr" style="display:inline-block;padding:8px;background:#fff;border-radius:12px;border:1px solid #e2e8f0;margin-bottom:10px">
+            ${qrSvg(codigoPix)}
+          </div>
+          <div style="margin-top:4px">
+            <button type="button" class="botao sec pequeno" id="copiar-pix" style="width:100%;max-width:280px;margin:0 auto">Copiar Pix Copia e Cola</button>
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+
     ${resumoAgendamento(a)}
+
     <div class="acoes">
-      ${a.whatsapp ? `<a class="botao" href="${linkWhatsapp(a.whatsapp, msg)}">Avisar no WhatsApp</a>` : ''}
+      ${a.whatsapp ? `<a class="botao" href="${linkWhatsapp(a.whatsapp, msgZap)}" target="_blank" rel="noopener">${temSinalPendente ? 'Enviar comprovante no WhatsApp' : 'Avisar no WhatsApp'}</a>` : ''}
       <button class="botao sec" id="copiar">Copiar link do agendamento</button>
     </div>
     ${blocoInstalacao()}
     <p class="suave pequeno" style="margin-top:16px;text-align:center">Precisa mudar? Pelo link você pode cancelar até ${a.cancelar_horas}h antes. Guarde-o.</p>
     <p style="text-align:center;margin-top:16px"><button class="link" id="outro">Marcar outro horário</button></p>`);
+
   ligarInstalacao();
   app.querySelector('#copiar').addEventListener('click', async () => aviso((await copiar(linkDoAgendamento(token))) ? 'Link copiado' : 'Não deu para copiar', false));
+  if (codigoPix) {
+    app.querySelector('#copiar-pix')?.addEventListener('click', async () => aviso((await copiar(codigoPix)) ? 'Código Pix copiado!' : 'Não deu para copiar', false));
+  }
   app.querySelector('#outro').addEventListener('click', () => { history.replaceState(null, '', '/'); S.ids.clear(); S.local = null; S.data = null; S.inicio = null; S.dispo = null; telaHorario(); });
 }
 
@@ -330,6 +379,28 @@ async function telaMeu(token) {
   const cancelado = a.status === 'cancelado';
   const titulo = cancelado ? 'Agendamento cancelado' : a.status === 'concluido' ? 'Atendimento concluído' : 'Seu horário';
   const msgCancela = `Olá! Cancelei meu agendamento de ${dataLonga(a.data)} às ${hora(a.inicio_min)} (${a.servicos.map((s) => s.nome).join(' + ')}). Nome: ${a.cliente_nome}`;
+  const total = a.preco_tabela_centavos || a.servicos.reduce((s, x) => s + x.preco_centavos, 0);
+  const sinalCentavos = a.sinal_valor_centavos || 0;
+  const saldoCentavos = Math.max(0, total - sinalCentavos);
+
+  const avisoSinal = a.sinal_status === 'pendente' && sinalCentavos > 0
+    ? `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px">⏳</span>
+        <div>
+          <strong style="color:#b45309;font-size:0.9rem">Aguardando envio do comprovante do sinal (${moeda(sinalCentavos)})</strong>
+          <p class="pequecom suave" style="margin:2px 0 0">Para confirmar seu horário, envie o comprovante de Pix para a manicure no WhatsApp.</p>
+        </div>
+      </div>`
+    : a.sinal_status === 'confirmado' && sinalCentavos > 0
+      ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:22px">✓</span>
+          <div>
+            <strong style="color:#15803d;font-size:0.9rem">Sinal de ${moeda(sinalCentavos)} confirmado!</strong>
+            <p class="pequecom suave" style="margin:2px 0 0">Horário garantido. Saldo a pagar no atendimento: ${moeda(saldoCentavos)}.</p>
+          </div>
+        </div>`
+      : '';
+
   const rodape = cancelado
     ? `<div class="acoes">
         ${a.whatsapp ? `<a class="botao sec" href="${linkWhatsapp(a.whatsapp, msgCancela)}" target="_blank" rel="noopener">Avisar a manicure no WhatsApp</a>` : ''}
@@ -340,7 +411,7 @@ async function telaMeu(token) {
       ? `<div class="acoes"><button class="botao perigo" id="cancelar">Cancelar agendamento</button></div>`
       : `<div class="aviso">O prazo para cancelar pelo link é de ${a.cancelar_horas}h antes do horário. Para mudar, fale com a manicure.</div>
          ${a.whatsapp ? `<div class="acoes"><a class="botao" href="${linkWhatsapp(a.whatsapp, 'Olá! Preciso falar sobre meu horário de ' + dataLonga(a.data) + ', ' + hora(a.inicio_min) + '.')}">Falar no WhatsApp</a></div>` : ''}`;
-  iniciar(`${marca(titulo, a.nome_negocio)}${resumoAgendamento(a)}${!cancelado ? blocoInstalacao() : ''}${rodape}`);
+  iniciar(`${marca(titulo, a.nome_negocio)}${avisoSinal}${resumoAgendamento(a)}${!cancelado ? blocoInstalacao() : ''}${rodape}`);
   ligarInstalacao();
   app.querySelector('#cancelar')?.addEventListener('click', async (ev) => {
     const ok = await confirmar({
