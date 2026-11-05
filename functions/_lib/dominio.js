@@ -82,23 +82,32 @@ export function validarLocal(local, cfg) {
 // Cria o agendamento de forma atômica: só insere se não houver conflito.
 // Retorna o token ou null quando o horário já foi ocupado.
 export async function criarAgendamento(db, cfg, a) {
+  const sinalStatus = a.sinal_status || 'nenhum';
+  const sinalPorcentagem = a.sinal_porcentagem || 0;
+  const sinalValorCentavos = a.sinal_valor_centavos || 0;
+  const sinalPago = a.sinal_pago ? 1 : 0;
+  const sinalPagoEm = a.sinal_pago_em || null;
+
   const stmtInsert = a.forcar
     ? db.prepare(
         `INSERT INTO agendamentos
-           (cliente_id, data, inicio_min, duracao_min, local, endereco, referencia, preco_tabela_centavos, token, origem, observacoes, criado_em)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
+           (cliente_id, data, inicio_min, duracao_min, local, endereco, referencia, preco_tabela_centavos, token, origem, observacoes, criado_em, sinal_status, sinal_porcentagem, sinal_valor_centavos, sinal_pago, sinal_pago_em)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)`
       ).bind(
         a.cliente_id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco || null, a.referencia || null,
-        a.preco, a.token, a.origem, a.observacoes || null, Date.now()
+        a.preco, a.token, a.origem, a.observacoes || null, Date.now(),
+        sinalStatus, sinalPorcentagem, sinalValorCentavos, sinalPago, sinalPagoEm
       )
     : db.prepare(
         `INSERT INTO agendamentos
-           (cliente_id, data, inicio_min, duracao_min, local, endereco, referencia, preco_tabela_centavos, token, origem, observacoes, criado_em)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
-         WHERE ${sqlSemConflito({ d: 2, i: 3, u: 4, l: 5, dl: 13, rs: 14 })}`
+           (cliente_id, data, inicio_min, duracao_min, local, endereco, referencia, preco_tabela_centavos, token, origem, observacoes, criado_em, sinal_status, sinal_porcentagem, sinal_valor_centavos, sinal_pago, sinal_pago_em)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+         WHERE ${sqlSemConflito({ d: 2, i: 3, u: 4, l: 5, dl: 18, rs: 19 })}`
       ).bind(
         a.cliente_id, a.data, a.inicio_min, a.duracao_min, a.local, a.endereco || null, a.referencia || null,
-        a.preco, a.token, a.origem, a.observacoes || null, Date.now(), cfg.deslocamento_min, cfg.respiro_min
+        a.preco, a.token, a.origem, a.observacoes || null, Date.now(),
+        sinalStatus, sinalPorcentagem, sinalValorCentavos, sinalPago, sinalPagoEm,
+        cfg.deslocamento_min, cfg.respiro_min
       );
 
   const stmts = [

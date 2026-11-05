@@ -224,6 +224,21 @@ export async function garantirColunasLembretes(db) {
     if (!colunas.includes('cancelamento_dispensado')) {
       await db.prepare('ALTER TABLE agendamentos ADD COLUMN cancelamento_dispensado INTEGER NOT NULL DEFAULT 0').run();
     }
+    if (!colunas.includes('sinal_status')) {
+      await db.prepare("ALTER TABLE agendamentos ADD COLUMN sinal_status TEXT NOT NULL DEFAULT 'nenhum'").run();
+    }
+    if (!colunas.includes('sinal_porcentagem')) {
+      await db.prepare('ALTER TABLE agendamentos ADD COLUMN sinal_porcentagem INTEGER DEFAULT 0').run();
+    }
+    if (!colunas.includes('sinal_valor_centavos')) {
+      await db.prepare('ALTER TABLE agendamentos ADD COLUMN sinal_valor_centavos INTEGER DEFAULT 0').run();
+    }
+    if (!colunas.includes('sinal_pago')) {
+      await db.prepare('ALTER TABLE agendamentos ADD COLUMN sinal_pago INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!colunas.includes('sinal_pago_em')) {
+      await db.prepare('ALTER TABLE agendamentos ADD COLUMN sinal_pago_em INTEGER').run();
+    }
     const infoCli = await db.prepare('PRAGMA table_info(clientes)').all();
     const colunasCli = (infoCli.results || []).map((r) => r.name);
     if (!colunasCli.includes('ultimo_aviso_fidelizacao')) {

@@ -40,8 +40,8 @@ export function normalizarWhatsapp(v) {
   return d;
 }
 
-const NUM = ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias'];
-const BOOL = ['atende_espaco', 'atende_domicilio', 'encaixar_colado', 'exibir_whatsapp_bio'];
+const NUM = ['respiro_min', 'deslocamento_min', 'antecedencia_min', 'janela_dias', 'passo_min', 'cancelar_horas', 'alerta_sumidos_dias', 'sinal_porcentagem', 'sinal_prazo_horas'];
+const BOOL = ['atende_espaco', 'atende_domicilio', 'encaixar_colado', 'exibir_whatsapp_bio', 'sinal_ativo'];
 const PADRAO = {
   nome_negocio: 'Jerusa Beauty', whatsapp: '', endereco_espaco: '',
   ramo_atividade: 'Manicure & Nail Designer',
@@ -52,6 +52,7 @@ const PADRAO = {
   alerta_sumidos_dias: 15,
   atende_espaco: true, atende_domicilio: true, encaixar_colado: true,
   pix_tipo: 'telefone', pix_chave: '', pix_nome: '', pix_cidade: '',
+  sinal_ativo: false, sinal_porcentagem: 30, sinal_prazo_horas: 2,
 };
 
 export async function carregarConfig(db) {
