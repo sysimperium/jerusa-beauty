@@ -700,6 +700,26 @@ Quaisquer atualizações substanciais das condições contratuais serão previam
 }
 
 // ======================================================================== atendimento (cartão + ações)
+function tempoAguardandoSinal(criadoEm) {
+  if (!criadoEm) return { texto: 'recente', classe: 'ok', totalMin: 0, urgente: false };
+  const diffMs = Math.max(0, Date.now() - Number(criadoEm));
+  const totalMin = Math.floor(diffMs / 60000);
+  const horas = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  let texto = '';
+  if (horas === 0) texto = `${mins}min`;
+  else if (mins === 0) texto = `${horas}h`;
+  else texto = `${horas}h ${mins}min`;
+
+  if (totalMin < 60) {
+    return { texto, classe: 'ok', totalMin, urgente: false };
+  } else if (totalMin <= 120) {
+    return { texto, classe: 'atencao', totalMin, urgente: false };
+  } else {
+    return { texto, classe: 'perigo', totalMin, urgente: true };
+  }
+}
+
 function linhaAtendimento(a, agoraMin = null) {
   const dom = a.local === 'domicilio';
   const etiq = [];
@@ -714,6 +734,19 @@ function linhaAtendimento(a, agoraMin = null) {
   } else if (a.status === 'faltou') {
     etiq.push('<span class="selo-texto">Faltou</span>');
   } else if (a.status === 'agendado') {
+    if (a.sinal_status === 'pendente') {
+      const infoTempo = tempoAguardandoSinal(a.criado_em);
+      if (infoTempo.classe === 'perigo') {
+        etiq.push(`<span class="selo-texto perigo" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5" title="Aguardando há ${infoTempo.texto}">⚠️ Sinal: ${infoTempo.texto} — Liberar?</span>`);
+      } else if (infoTempo.classe === 'atencao') {
+        etiq.push(`<span class="selo-texto atencao" title="Aguardando há ${infoTempo.texto}">⏳ Sinal: ${infoTempo.texto}</span>`);
+      } else {
+        etiq.push(`<span class="selo-texto ok" style="background:#dcfce7;color:#15803d;border:1px solid #86efac" title="Aguardando há ${infoTempo.texto}">⏳ Sinal: ${infoTempo.texto}</span>`);
+      }
+    } else if (a.sinal_status === 'confirmado') {
+      etiq.push(`<span class="selo-texto ok" title="Sinal pago">✓ Sinal (${moeda(a.sinal_valor_centavos || 0)})</span>`);
+    }
+
     if (agoraMin != null && a.data === S.hoje) {
       if (agoraMin >= a.inicio_min + a.duracao_min) {
         pendenteFechamento = true;
@@ -745,9 +778,23 @@ function abrirAtendimento(a, recarregar) {
   const agoraMinHoje = S.hoje ? (new Date(Date.now() - 3 * 3600000).getUTCHours() * 60 + new Date(Date.now() - 3 * 3600000).getUTCMinutes()) : null;
   const atrasado = aberto && a.data === S.hoje && agoraMinHoje != null && agoraMinHoje >= a.inicio_min + a.duracao_min;
   const msgCliente = `Olá, ${a.cliente_nome.split(' ')[0]}! Confirmando seu horário: ${a.servicos.map((s) => s.nome).join(' + ')}, ${dataLonga(a.data)} às ${hora(a.inicio_min)}${dom ? ' (com seu endereço)' : ''}. Até lá! 💅`;
+  const infoEspera = a.sinal_status === 'pendente' ? tempoAguardandoSinal(a.criado_em) : null;
+
   folha(`
     <h2>${esc(a.cliente_nome)}</h2>
     <p class="suave">${esc(dataLonga(a.data))}, ${hora(a.inicio_min)} às ${hora(a.inicio_min + a.duracao_min)} · ${nomeLocal(a.local)}</p>
+
+    ${infoEspera ? `
+    <div style="margin:12px 0;background:#fffbeb;border:1.5px solid ${infoEspera.urgente ? '#ef4444' : '#f59e0b'};border-radius:12px;padding:12px 14px;color:#92400e">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:.92rem">⏳ Aguardando Sinal de ${moeda(a.sinal_valor_centavos || 0)} (${a.sinal_porcentagem || 30}%)</strong>
+        <span class="selo-texto ${infoEspera.classe}">${infoEspera.texto}</span>
+      </div>
+      <p class="pequeno" style="margin:4px 0 0;color:#78350f">
+        ${infoEspera.urgente ? '⚠️ Já passou do prazo de 2 horas. Caso a cliente não responda ou não envie o comprovante, libere o horário.' : 'Horário reservado aguardando envio do comprovante Pix pela cliente.'}
+      </p>
+    </div>` : ''}
+
     ${atrasado ? `
     <div style="margin:12px 0;background:#fffdf7;border:1.5px solid #f59e0b;border-radius:12px;padding:12px 14px;color:#92400e">
       <strong style="display:block;font-size:.9rem;margin-bottom:2px">⚠️ Atendimento concluído?</strong>
@@ -755,23 +802,67 @@ function abrirAtendimento(a, recarregar) {
     </div>` : ''}
     <dl class="resumo">
       ${a.servicos.map((s) => `<div><dt>${esc(s.nome)}</dt><dd>${moeda(s.preco_centavos)}</dd></div>`).join('')}
+      ${a.sinal_pago ? `<div><dt>Sinal pago</dt><dd style="color:var(--ok)">- ${moeda(a.sinal_valor_centavos || 0)}</dd></div>` : ''}
       ${a.valor_cobrado_centavos != null && a.valor_cobrado_centavos !== a.preco_tabela_centavos ? `<div><dt>Valor cobrado</dt><dd>${moeda(a.valor_cobrado_centavos)}</dd></div>` : ''}
       ${dom && a.endereco ? `<div><dt>Endereço</dt><dd>${esc(a.endereco)}${a.referencia ? `<br><span class="suave pequeno">${esc(a.referencia)}</span>` : ''}</dd></div>` : ''}
       ${a.observacoes ? `<div><dt>Observação</dt><dd>${esc(a.observacoes)}</dd></div>` : ''}
     </dl>
     <div class="acoes">
+      ${a.sinal_status === 'pendente' ? `
+        <button class="botao" data-acao="confirmar-sinal" style="background:#16a34a;border-color:#16a34a">✓ Confirmar Sinal Recebido</button>
+        <button class="botao sec" data-acao="lembrar-sinal">💬 Lembrar Sinal (WhatsApp)</button>
+        <button class="botao perigo" data-acao="recusar-sinal">✕ Sinal Não Recebido (Liberar Horário)</button>
+      ` : ''}
       ${aberto ? '<button class="botao" data-acao="concluir">Concluir atendimento</button>' : ''}
       ${a.status === 'concluido' && !a.pago ? '<button class="botao" data-acao="pagar">Marcar como pago</button>' : ''}
       ${a.status === 'concluido' && a.forma_pagamento === 'pix' && !a.pago ? '<button class="botao sec" data-acao="qr">Mostrar QR Pix</button>' : ''}
       <a class="botao sec" href="${linkWhatsapp(a.cliente_whatsapp, aberto ? msgCliente : '')}">Falar com WhatsApp</a>
       ${dom && a.endereco ? `<a class="botao sec" href="${maps(a.endereco)}" target="_blank" rel="noopener">Abrir com mapa</a>` : ''}
       ${aberto ? '<button class="botao sec" data-acao="remarcar">Remarcar</button>' : ''}
-      ${aberto ? '<div class="acoes duas"><button class="botao sec" data-acao="faltou">Faltou</button><button class="botao perigo" data-acao="cancelar">Cancelar</button></div>' : ''}
+      ${aberto && a.sinal_status !== 'pendente' ? '<div class="acoes duas"><button class="botao sec" data-acao="faltou">Faltou</button><button class="botao perigo" data-acao="cancelar">Cancelar</button></div>' : ''}
       ${!aberto ? '<button class="botao sec" data-acao="reabrir">Voltar para agendado</button>' : ''}
     </div>`, (f) => {
     f.querySelectorAll('[data-acao]').forEach((b) => b.addEventListener('click', async () => {
       const acao = b.dataset.acao;
       const atualizar = async (corpo, msg) => { if (await seguro(() => api(`/admin/agendamentos/${a.id}`, { metodo: 'PATCH', corpo }))) { fecharFolha(); aviso(msg); recarregar(); } };
+      if (acao === 'confirmar-sinal') {
+        const r = await seguro(() => api(`/admin/agendamentos/${a.id}/confirmar-sinal`, { metodo: 'POST' }));
+        if (r) {
+          fecharFolha();
+          aviso('Sinal confirmado com sucesso!');
+          recarregar();
+        }
+        return;
+      }
+      if (acao === 'lembrar-sinal') {
+        const r = await seguro(() => api(`/admin/agendamentos/${a.id}/lembrar-sinal`, { metodo: 'POST' }));
+        if (r) {
+          fecharFolha();
+          if (r.enviado) aviso('Lembrete enviado via WhatsApp!');
+          else if (a.cliente_whatsapp) window.open(linkWhatsapp(a.cliente_whatsapp, r.mensagem), '_blank');
+          recarregar();
+        }
+        return;
+      }
+      if (acao === 'recusar-sinal') {
+        const ok = await confirmar({
+          titulo: 'Sinal não recebido?',
+          mensagem: `Deseja liberar o horário de ${esc(a.cliente_nome)}? O agendamento será cancelado e a vaga voltará a ficar livre para outras clientes na agenda.`,
+          textoOk: 'Sim, liberar horário',
+          textoCancelar: 'Voltar',
+          perigo: true,
+        });
+        if (ok) {
+          const r = await seguro(() => api(`/admin/agendamentos/${a.id}/recusar-sinal`, { metodo: 'POST' }));
+          if (r) {
+            fecharFolha();
+            if (!r.enviado && a.cliente_whatsapp) window.open(linkWhatsapp(a.cliente_whatsapp, r.mensagem), '_blank');
+            aviso('Horário liberado na agenda');
+            recarregar();
+          }
+        }
+        return;
+      }
       if (acao === 'concluir') return folhaConcluir(a, recarregar);
       if (acao === 'qr') return folhaQr(a, valorDe(a), recarregar);
       if (acao === 'pagar') return atualizar({ pago: true }, 'Marcado como pago');
@@ -829,11 +920,24 @@ function folhaRemarcadoSucesso(a, novaData, novoMin, recarregar) {
 
 function folhaConcluir(a, recarregar) {
   const tabela = a.preco_tabela_centavos;
+  const temSinalPago = a.sinal_pago === 1 && ((a.sinal_valor_centavos || 0) > 0);
+  const sinalCentavos = temSinalPago ? a.sinal_valor_centavos : 0;
+  const saldoRestante = Math.max(0, tabela - sinalCentavos);
+  const valorPadraoCentavos = temSinalPago ? saldoRestante : tabela;
+
   const temPix = !!(S.config?.pix_chave && S.config.pix_chave.trim());
   const formaPadrao = temPix ? 'pix' : 'dinheiro';
   folha(`<h2>Concluir atendimento</h2><p class="suave">${esc(a.cliente_nome)} · ${a.servicos.map((s) => esc(s.nome)).join(' + ')}</p>
-    <div class="campo"><label for="valor">Valor cobrado (R$)</label><input id="valor" inputmode="decimal" value="${centavosParaCampo(tabela)}" autofocus>
-      <span class="dica" id="dica">Valor de tabela: ${moeda(tabela)}</span></div>
+    ${temSinalPago ? `
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:10px 14px;margin:12px 0;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong style="color:#15803d;font-size:0.9rem">✓ Sinal de ${moeda(sinalCentavos)} pago previamente</strong>
+          <div class="pequecom suave">Valor total: ${moeda(tabela)} · Saldo a receber agora: <strong>${moeda(saldoRestante)}</strong></div>
+        </div>
+      </div>
+    ` : ''}
+    <div class="campo"><label for="valor">Valor cobrado (R$)</label><input id="valor" inputmode="decimal" value="${centavosParaCampo(valorPadraoCentavos)}" autofocus>
+      <span class="dica" id="dica">${temSinalPago ? `Saldo restante a receber: ${moeda(saldoRestante)} (sinal de ${moeda(sinalCentavos)} já pago deduzido)` : `Valor de tabela: ${moeda(tabela)}`}</span></div>
     <div class="campo"><span class="rotulo">Forma de pagamento</span>
       <div class="segmentos" id="forma">${[['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['cartao', 'Cartão']].map(([k, t]) => `<button type="button" data-f="${k}" aria-pressed="${k === formaPadrao}">${t}</button>`).join('')}</div></div>
     <label class="interruptor" style="margin-top:8px"><span>Já recebi o pagamento</span><input type="checkbox" id="pago" ${formaPadrao !== 'pix' ? 'checked' : ''}><span class="trilho"></span></label>
@@ -844,7 +948,15 @@ function folhaConcluir(a, recarregar) {
     const dica = f.querySelector('#dica');
     const atualizarDica = () => {
       const v = lerDinheiro(valor.value);
-      dica.textContent = v == null ? 'Digite um valor válido' : v === tabela ? `Valor de tabela: ${moeda(tabela)}` : v < tabela ? `Desconto de ${moeda(tabela - v)} sobre ${moeda(tabela)}` : `Acréscimo de ${moeda(v - tabela)} sobre ${moeda(tabela)}`;
+      if (v == null) {
+        dica.textContent = 'Digite um valor válido';
+      } else if (temSinalPago) {
+        dica.textContent = v === saldoRestante
+          ? `Saldo restante: ${moeda(saldoRestante)} (sinal de ${moeda(sinalCentavos)} já deduzido)`
+          : `Cobrando ${moeda(v)} (tabela total: ${moeda(tabela)} com sinal de ${moeda(sinalCentavos)})`;
+      } else {
+        dica.textContent = v === tabela ? `Valor de tabela: ${moeda(tabela)}` : v < tabela ? `Desconto de ${moeda(tabela - v)} sobre ${moeda(tabela)}` : `Acréscimo de ${moeda(v - tabela)} sobre ${moeda(tabela)}`;
+      }
     };
     valor.addEventListener('input', atualizarDica);
     f.querySelectorAll('#forma button').forEach((b) => b.addEventListener('click', () => {
@@ -1032,8 +1144,10 @@ async function telaInicio() {
   const proxNome = prox ? (prox === somaDias(p.hoje, 1) ? 'Amanhã' : dataLonga(prox)) : '';
   const todosAtendimentos = [...p.agendamentos_hoje, ...(p.agendamentos_proximo_dia || [])];
   const diasSumido = p.alerta_sumidos_dias || 15;
+  const pendentesSinal = p.sinal_pendentes || [];
 
   let alertasQtd = 0;
+  if (pendentesSinal.length > 0) alertasQtd++;
   if (vencidosHoje.length > 0) alertasQtd++;
   if (p.a_receber_qtd > 0) alertasQtd++;
   if (p.proximos_7_dias <= 3) alertasQtd++;
@@ -1101,6 +1215,40 @@ async function telaInicio() {
         <h2>Central de Decisão & Alertas</h2>
         <span class="selo-texto ${alertasQtd > 0 ? 'pend' : 'ok'}">${alertasQtd} ação${alertasQtd === 1 ? '' : 'ões'} pendente${alertasQtd === 1 ? '' : 's'}</span>
       </div>
+
+      ${pendentesSinal.length > 0 ? `
+      <div class="card-alerta alerta-sinal" style="border-left: 4px solid #f59e0b; background: #fffbeb; padding: 14px 16px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px;">
+          <div>
+            <strong style="color: #b45309; font-size: 1rem; display: flex; align-items:center; gap: 6px;">
+              <span>⏳</span> Reservas Aguardando Sinal (${pendentesSinal.length})
+            </strong>
+            <p class="pequecom suave" style="margin: 2px 0 0 0;">Horários pré-reservados aguardando comprovante Pix da cliente.</p>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap: 8px; margin-top: 10px;">
+          ${pendentesSinal.map((a) => {
+            const info = tempoAguardandoSinal(a.criado_em);
+            return `
+              <div class="item-sinal-alerta" data-id="${a.id}" style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #fde68a; gap:10px; flex-wrap:wrap;">
+                <div>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <strong style="font-size:0.92rem">${esc(a.cliente_nome)}</strong>
+                    <span class="selo-texto ${info.classe}">${info.texto} aguardando</span>
+                  </div>
+                  <div class="pequecom suave">${dataCurta(a.data)} às ${hora(a.inicio_min)} · Sinal: <strong>${moeda(a.sinal_valor_centavos || 0)}</strong> (${a.sinal_porcentagem || 30}%)</div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <button class="botao pequeno btn-acao-sinal-confirmar" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;background:#16a34a;border-color:#16a34a">✓ Confirmar</button>
+                  <button class="botao sec pequecom btn-acao-sinal-lembrar" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px">💬 Lembrar</button>
+                  <button class="botao sec pequecom btn-acao-sinal-recusar" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;color:#dc2626">✕ Liberar</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+      ` : ''}
 
       ${canceladosVisiveis.length > 0 ? `
       <div class="card-alerta alerta-cancelamentos" style="border-left: 4px solid var(--cor-perigo, #e11d48); background: var(--cor-fundo-suave, #fff1f2); padding: 14px 16px; border-radius: 8px; margin-bottom: 20px;">
@@ -1188,20 +1336,29 @@ async function telaInicio() {
         <button class="link" id="ver-grade" style="font-size:.875rem;white-space:nowrap">Ver na agenda →</button>
       </div>
 
+      ${p.agendamentos_hoje.length > 0 ? `
+      <div class="segmentos-filtro" id="filtro-inicio" style="margin:10px 0 14px">
+        <button type="button" class="filtro-btn" data-filtro="todos" aria-pressed="true">Todos (${p.agendamentos_hoje.length})</button>
+        <button type="button" class="filtro-btn" data-filtro="confirmados" aria-pressed="false">Confirmados (${p.agendamentos_hoje.filter(a => a.sinal_status !== 'pendente').length})</button>
+        ${p.agendamentos_hoje.filter(a => a.sinal_status === 'pendente').length > 0 ? `
+          <button type="button" class="filtro-btn" data-filtro="aguardando_sinal" aria-pressed="false">⏳ Aguardando Sinal (${p.agendamentos_hoje.filter(a => a.sinal_status === 'pendente').length})</button>
+        ` : ''}
+      </div>` : ''}
+
       <div id="hoje" style="margin-top:14px">
         ${p.agendamentos_hoje.length === 0 ? '<p class="vazio">Dia livre hoje.</p>' : `
           ${abertos.length > 0 ? `
-            <div style="margin-bottom:14px">
+            <div id="bloco-abertos" style="margin-bottom:14px">
               <div style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--suave);margin-bottom:8px">A atender (${abertos.length})</div>
               ${abertos.map((a) => linhaAtendimento(a, p.agora_min)).join('')}
             </div>` : ''}
           ${concluidosHoje.length > 0 ? `
-            <div>
+            <div id="bloco-concluidos">
               <div style="font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--ok);margin-bottom:8px">✓ Já atendidos (${concluidosHoje.length})</div>
               ${concluidosHoje.map((a) => linhaAtendimento(a, p.agora_min)).join('')}
             </div>` : ''}
           ${p.agendamentos_hoje.filter((a) => a.status !== 'agendado' && a.status !== 'concluido').length > 0 ? `
-            <details style="margin-top:10px">
+            <details id="bloco-outros" style="margin-top:10px">
               <summary class="suave pequeno" style="cursor:pointer;padding:4px 0">Outros atendimentos (${p.agendamentos_hoje.filter((a) => a.status !== 'agendado' && a.status !== 'concluido').length})</summary>
               <div style="margin-top:6px">${p.agendamentos_hoje.filter((a) => a.status !== 'agendado' && a.status !== 'concluido').map((a) => linhaAtendimento(a, p.agora_min)).join('')}</div>
             </details>` : ''}
@@ -1225,6 +1382,74 @@ async function telaInicio() {
 
   ligarAtendimentos(todosAtendimentos, telaInicio);
   conteudo().querySelector('#novo').addEventListener('click', () => folhaNovo(S.hoje, telaInicio));
+
+  // Ações rápidas do card de sinal na tela inicial
+  conteudo().querySelectorAll('.btn-acao-sinal-confirmar').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const res = await seguro(() => api(`/admin/agendamentos/${id}/confirmar-sinal`, { metodo: 'POST' }));
+      if (res) {
+        aviso('Sinal confirmado com sucesso!');
+        telaInicio();
+      }
+    });
+  });
+
+  conteudo().querySelectorAll('.btn-acao-sinal-lembrar').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const a = pendentesSinal.find((x) => String(x.id) === String(id));
+      const res = await seguro(() => api(`/admin/agendamentos/${id}/lembrar-sinal`, { metodo: 'POST' }));
+      if (res) {
+        if (res.enviado) aviso('Lembrete enviado via WhatsApp!');
+        else if (a?.cliente_whatsapp) window.open(linkWhatsapp(a.cliente_whatsapp, res.mensagem), '_blank');
+        else aviso('Lembrete gerado');
+        telaInicio();
+      }
+    });
+  });
+
+  conteudo().querySelectorAll('.btn-acao-sinal-recusar').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const a = pendentesSinal.find((x) => String(x.id) === String(id));
+      const ok = await confirmar({
+        titulo: 'Liberar horário?',
+        mensagem: `Deseja liberar o horário de ${esc(a?.cliente_nome || 'cliente')}? O horário ficará livre na agenda imediatamente e a cliente será avisada via WhatsApp.`,
+        textoOk: 'Sim, liberar',
+        textoCancelar: 'Voltar',
+        perigo: true,
+      });
+      if (ok) {
+        const res = await seguro(() => api(`/admin/agendamentos/${id}/recusar-sinal`, { metodo: 'POST' }));
+        if (res) {
+          if (!res.enviado && a?.cliente_whatsapp) window.open(linkWhatsapp(a.cliente_whatsapp, res.mensagem), '_blank');
+          aviso('Horário liberado na agenda');
+          telaInicio();
+        }
+      }
+    });
+  });
+
+  // Filtro rápido no topo da lista de hoje
+  conteudo().querySelectorAll('#filtro-inicio .filtro-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const f = btn.dataset.filtro;
+      conteudo().querySelectorAll('#filtro-inicio .filtro-btn').forEach((b) => b.setAttribute('aria-pressed', b === btn));
+      conteudo().querySelectorAll('#hoje .atendimento').forEach((el) => {
+        const id = Number(el.dataset.id);
+        const item = p.agendamentos_hoje.find((x) => x.id === id);
+        if (!item) return;
+        if (f === 'todos') {
+          el.style.display = '';
+        } else if (f === 'confirmados') {
+          el.style.display = item.sinal_status === 'pendente' ? 'none' : '';
+        } else if (f === 'aguardando_sinal') {
+          el.style.display = item.sinal_status === 'pendente' ? '' : 'none';
+        }
+      });
+    });
+  });
   const btnOlho = conteudo().querySelector('#btn-olho');
   if (btnOlho) {
     btnOlho.addEventListener('click', () => {
@@ -1324,6 +1549,7 @@ async function telaAgenda() {
   const agendados = lista.filter((a) => a.status === 'agendado');
   const concluidos = lista.filter((a) => a.status === 'concluido');
   const outros = lista.filter((a) => a.status === 'cancelado' || a.status === 'faltou');
+  const pendentesSinal = lista.filter((a) => a.status === 'agendado' && a.sinal_status === 'pendente');
   const canceladosHoje = (lista || []).filter((a) => a.status === 'cancelado');
   const totalConcluido = concluidos.reduce((s, a) => s + valorDe(a), 0);
   const totalAgendado = agendados.reduce((s, a) => s + valorDe(a), 0);
@@ -1333,12 +1559,18 @@ async function telaAgenda() {
   conteudo().innerHTML = `
     <header class="cabeca">
       <div><h1 class="assinatura">Agenda</h1><p>${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''} · ${agendados.length} a atender · ${concluidos.length} já atendido(s)</p></div>
-      ${(S.licenca && !S.licenca.isento_mensalidade) ? `
-        <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
-          <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
-          <span>Mensalidade</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="icone-btn" id="btn-config-sinal" type="button" title="Configurações do Sinal" style="display:flex;align-items:center;gap:6px;font-size:0.8rem;padding:6px 12px;border-radius:12px;background:var(--marfim);border:1px solid var(--linha)">
+          <span>⚙️ Sinal</span>
+          ${S.config?.sinal_ativo ? '<span class="ponto-status ok"></span>' : ''}
         </button>
-      ` : ''}
+        ${(S.licenca && !S.licenca.isento_mensalidade) ? `
+          <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
+            <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
+            <span>Mensalidade</span>
+          </button>
+        ` : ''}
+      </div>
     </header>
     <div class="nav-data">
       <button class="icone-btn" id="ant" aria-label="Dia anterior">${icone('esq')}</button>
@@ -1362,6 +1594,7 @@ async function telaAgenda() {
     <div class="segmentos-filtro" id="filtro-agenda">
       <button type="button" class="filtro-btn" data-filtro="todos" aria-pressed="true">Todos (${lista.length})</button>
       <button type="button" class="filtro-btn" data-filtro="agendados" aria-pressed="false">A atender (${agendados.length})</button>
+      ${pendentesSinal.length > 0 ? `<button type="button" class="filtro-btn" data-filtro="sinal" aria-pressed="false" style="color:var(--perigo, #b91c1c);font-weight:600">⏳ Sinal (${pendentesSinal.length})</button>` : ''}
       <button type="button" class="filtro-btn" data-filtro="concluidos" aria-pressed="false">Já atendidos (${concluidos.length})</button>
       ${outros.length ? `<button type="button" class="filtro-btn" data-filtro="outros" aria-pressed="false">Cancelados (${outros.length})</button>` : ''}
     </div>` : ''}
@@ -1420,17 +1653,166 @@ async function telaAgenda() {
       const sAg = c.querySelector('#secao-agendados');
       const sCo = c.querySelector('#secao-concluidos');
       const sOu = c.querySelector('#secao-outros');
-      if (sAg) sAg.hidden = (f === 'concluidos' || f === 'outros') || agendados.length === 0;
-      if (sCo) sCo.hidden = (f === 'agendados' || f === 'outros') || concluidos.length === 0;
-      if (sOu) sOu.hidden = (f === 'agendados' || f === 'concluidos') || outros.length === 0;
+      if (f === 'sinal') {
+        if (sAg) {
+          sAg.hidden = false;
+          sAg.querySelectorAll('.atendimento').forEach((el) => {
+            const id = Number(el.dataset.id);
+            const item = lista.find((x) => x.id === id);
+            el.style.display = item && item.sinal_status === 'pendente' ? '' : 'none';
+          });
+        }
+        if (sCo) sCo.hidden = true;
+        if (sOu) sOu.hidden = true;
+      } else {
+        if (sAg) {
+          sAg.hidden = (f === 'concluidos' || f === 'outros') || agendados.length === 0;
+          sAg.querySelectorAll('.atendimento').forEach((el) => el.style.display = '');
+        }
+        if (sCo) sCo.hidden = (f === 'agendados' || f === 'outros') || concluidos.length === 0;
+        if (sOu) sOu.hidden = (f === 'agendados' || f === 'concluidos') || outros.length === 0;
+      }
     });
   });
 
   ligarAtendimentos(lista, telaAgenda);
+  conteudo().querySelector('#btn-config-sinal')?.addEventListener('click', () => folhaConfigSinal(telaAgenda));
   conteudo().querySelector('#btn-mensalidade-agenda')?.addEventListener('click', () => folhaMensalidades());
   conteudo().querySelector('#atalho-ver-cancelados')?.addEventListener('click', () => {
     const btnOutros = conteudo().querySelector('#filtro-agenda [data-filtro="outros"]');
     if (btnOutros) btnOutros.click();
+  });
+}
+
+async function folhaConfigSinal(recarregar) {
+  const cfgAll = await seguro(() => api('/admin/config'));
+  if (!cfgAll) return;
+  const cfg = cfgAll.config || {};
+  S.config = cfg;
+  const temPix = !!(cfg.pix_chave && cfg.pix_chave.trim());
+
+  if (!temPix) {
+    folha(`
+      <h2>Cobrança de Sinal</h2>
+      <p class="suave">Exigir pagamento de sinal para confirmação de reservas de horários.</p>
+      <div style="background:#fffbeb;border:1.5px solid #f59e0b;border-radius:12px;padding:14px;margin:16px 0;color:#92400e">
+        <strong style="display:block;margin-bottom:6px">⚠️ Chave Pix não configurada</strong>
+        <p class="pequeno" style="margin:0">Para cobrar sinal das clientes, você precisa cadastrar sua chave Pix na guia Ajustes.</p>
+      </div>
+      <div class="acoes">
+        <button class="botao" id="btn-ir-ajustes">Ir para a guia Ajustes →</button>
+      </div>
+    `, (f) => {
+      f.querySelector('#btn-ir-ajustes')?.addEventListener('click', () => {
+        fecharFolha();
+        ir('ajustes');
+      });
+    });
+    return;
+  }
+
+  const ativoAtual = !!cfg.sinal_ativo;
+  let pctAtual = Number(cfg.sinal_porcentagem) || 30;
+  let prazoAtual = Number(cfg.sinal_prazo_horas) || 2;
+
+  folha(`
+    <h2>Cobrança de Sinal</h2>
+    <p class="suave">Evite que clientes marquem e não compareçam cobrando um sinal em Pix.</p>
+
+    <div style="margin:16px 0">
+      <label class="interruptor" style="font-size:1rem;font-weight:600">
+        <span>Cobrar sinal na reserva</span>
+        <input type="checkbox" id="cfg-sinal-ativo" ${ativoAtual ? 'checked' : ''}>
+        <span class="trilho"></span>
+      </label>
+      <p class="pequeno suave" style="margin:6px 0 0">Quando ativado, os novos horários agendados pelo site ficam reservados aguardando o comprovante do sinal.</p>
+    </div>
+
+    <div id="cfg-sinal-opcoes" style="${ativoAtual ? '' : 'display:none;'}margin-top:16px;display:flex;flex-direction:column;gap:14px">
+      <div class="campo">
+        <label>Porcentagem do sinal (% sobre o valor do serviço)</label>
+        <div class="segmentos" id="pills-pct" style="margin-bottom:8px">
+          ${[20, 30, 40, 50].map((v) => `<button type="button" class="pill-pct" data-val="${v}" aria-pressed="${pctAtual === v}">${v}%</button>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="cfg-sinal-pct" min="1" max="100" value="${pctAtual}" style="max-width:120px">
+          <span class="suave">% do valor total</span>
+        </div>
+      </div>
+
+      <div class="campo">
+        <label for="cfg-sinal-prazo">Tempo de tolerância para receber o comprovante (horas)</label>
+        <div class="segmentos" id="pills-prazo" style="margin-bottom:8px">
+          ${[1, 2, 3, 4].map((h) => `<button type="button" class="pill-prazo" data-val="${h}" aria-pressed="${prazoAtual === h}">${h}h</button>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="cfg-sinal-prazo" min="1" max="48" value="${prazoAtual}" style="max-width:120px">
+          <span class="suave">horas de tolerância</span>
+        </div>
+        <span class="dica">Após este prazo, um alerta em vermelho sugerindo liberar o horário aparecerá no painel e na agenda.</span>
+      </div>
+
+      <div style="background:var(--marfim);border:1px solid var(--linha);border-radius:10px;padding:12px;font-size:0.85rem;color:var(--suave)">
+        <strong>Chave Pix cadastrada:</strong> ${esc(cfg.pix_chave)} (${esc(cfg.pix_tipo || 'pix')})<br>
+        <strong>Favorecido:</strong> ${esc(cfg.pix_nome || 'Não informado')} ${cfg.pix_cidade ? `- ${esc(cfg.pix_cidade)}` : ''}
+        <div style="margin-top:6px"><button type="button" class="link pequeno" id="link-alterar-pix">Alterar chave Pix nos Ajustes</button></div>
+      </div>
+    </div>
+
+    <div id="cfg-sinal-msg" style="margin-top:12px"></div>
+
+    <div class="acoes" style="margin-top:20px">
+      <button class="botao" id="btn-salvar-sinal">Salvar alterações</button>
+    </div>
+  `, (f) => {
+    const chkAtivo = f.querySelector('#cfg-sinal-ativo');
+    const divOpcoes = f.querySelector('#cfg-sinal-opcoes');
+    const inpPct = f.querySelector('#cfg-sinal-pct');
+    const inpPrazo = f.querySelector('#cfg-sinal-prazo');
+    const msgBox = f.querySelector('#cfg-sinal-msg');
+
+    chkAtivo.addEventListener('change', () => {
+      divOpcoes.style.display = chkAtivo.checked ? 'flex' : 'none';
+    });
+
+    f.querySelectorAll('.pill-pct').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        inpPct.value = btn.dataset.val;
+        f.querySelectorAll('.pill-pct').forEach((b) => b.setAttribute('aria-pressed', b === btn));
+      });
+    });
+
+    f.querySelectorAll('.pill-prazo').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        inpPrazo.value = btn.dataset.val;
+        f.querySelectorAll('.pill-prazo').forEach((b) => b.setAttribute('aria-pressed', b === btn));
+      });
+    });
+
+    f.querySelector('#link-alterar-pix')?.addEventListener('click', () => {
+      fecharFolha();
+      ir('ajustes');
+    });
+
+    f.querySelector('#btn-salvar-sinal').addEventListener('click', async () => {
+      const corpo = {
+        sinal_ativo: chkAtivo.checked,
+        sinal_porcentagem: Number(inpPct.value) || 30,
+        sinal_prazo_horas: Number(inpPrazo.value) || 2,
+      };
+
+      try {
+        const resp = await api('/admin/config/sinal', { metodo: 'PUT', corpo });
+        if (resp && resp.ok) {
+          S.config = { ...S.config, ...corpo };
+          fecharFolha();
+          aviso('Configurações de sinal atualizadas!');
+          recarregar?.();
+        }
+      } catch (e) {
+        msgBox.innerHTML = `<div class="aviso erro" role="alert">${esc(e.message)}</div>`;
+      }
+    });
   });
 }
 
