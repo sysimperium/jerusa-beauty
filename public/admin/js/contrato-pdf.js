@@ -55,7 +55,7 @@ export function gerarPdfContratoMinhaAgenda(dados = {}) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(56, 189, 248);
-  doc.text(dados.codigo_autenticidade || 'CT-2026-000001', 210 - margemDir - 5, y + 14, { align: 'right' });
+  doc.text(dados.codigo_autenticidade || '—', 210 - margemDir - 5, y + 14, { align: 'right' });
 
   y += 28;
 
@@ -154,7 +154,7 @@ export function gerarPdfContratoMinhaAgenda(dados = {}) {
   doc.text(`• Status: ASSINADO DIGITALMENTE E EM VIGÊNCIA`, margemEsq + 5, y + 12);
   doc.text(`• Data / Hora do Servidor: ${dataAssinatura}`, margemEsq + 5, y + 17);
   doc.text(`• Confirmação via WhatsApp: ${dados.assinado_por_whatsapp || dados.whatsapp_mascarado || dados.whatsapp}`, margemEsq + 5, y + 22);
-  doc.text(`• Código de Autenticidade: ${dados.codigo_autenticidade || 'CT-2026-000001'}`, margemEsq + 5, y + 27);
+  doc.text(`• Código de Autenticidade: ${dados.codigo_autenticidade || '—'}`, margemEsq + 5, y + 27);
   
   if (dados.hash_sha256) {
     doc.setFont('courier', 'normal');

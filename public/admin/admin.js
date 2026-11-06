@@ -572,7 +572,7 @@ A CONTRATANTE reconhece que notificações, integrações externas e mensagens a
         texto: `As partes reconhecem a plena validade jurídica e eficácia probatória da manifestação eletrônica de vontade, confirmada mediante validação por código OTP enviado ao número de WhatsApp previamente cadastrado.
 Não é exigida assinatura manuscrita nem o envio de documentos físicos pessoais para essa finalidade.
 O sistema registrará de forma imutável:
-• Nome da profissional (Jerusa Beauty) e estabelecimento (Jerusa Beauty);
+• Nome da profissional (${esc(S.licenca?.nome_cliente || S.config?.nome_salao || 'Cliente')}) e estabelecimento (${esc(S.config?.nome_salao || S.licenca?.nome_cliente || 'Estabelecimento')});
 • Número de WhatsApp utilizado na confirmação (${telAssinante});
 • Data e horário exatos registrados no servidor no momento do aceite;
 • Código único e exclusivo de autenticidade (${codigoAutenticidade});
@@ -614,7 +614,7 @@ Quaisquer atualizações substanciais das condições contratuais serão previam
       <h2 style="margin:0;font-size:1.15rem">📜 Contrato Digital Minha Agenda</h2>
       <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado Digitalmente</span>
     </div>
-    <p class="sub-texto" style="margin-top:0">SysImperium Soluções Tecnológicas & Jerusa Beauty</p>
+    <p class="sub-texto" style="margin-top:0">SysImperium Soluções Tecnológicas & ${esc(S.licenca?.nome_cliente || S.config?.nome_salao || 'Cliente')}</p>
 
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:14px;font-size:0.82rem;color:#166534">
       <div style="font-weight:700;margin-bottom:4px">Certificado de Assinatura Eletrônica</div>
@@ -630,7 +630,7 @@ Quaisquer atualizações substanciais das condições contratuais serão previam
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:0.8rem">
         <strong style="color:#0f172a;display:block;margin-bottom:6px">IDENTIFICAÇÃO DAS PARTES CONTRATANTES:</strong>
         <div><strong>CONTRATADA:</strong> ${esc(contratadaDados.razao_social)} (Representante: <strong>${esc(contratadaDados.representante)}</strong> · Contato: ${esc(contratadaDados.whatsapp)})</div>
-        <div style="margin-top:4px"><strong>CONTRATANTE:</strong> Jerusa Beauty (Estabelecimento cadastrado · WhatsApp: <strong>${esc(telAssinante)}</strong>)</div>
+        <div style="margin-top:4px"><strong>CONTRATANTE:</strong> ${esc(S.licenca?.nome_cliente || S.config?.nome_salao || 'Cliente')} (Estabelecimento cadastrado · WhatsApp: <strong>${esc(telAssinante)}</strong>)</div>
         <div style="margin-top:4px"><strong>VALOR & CONDIÇÃO:</strong> Adesão: <strong>R$ 39,99</strong> · Mensalidade: <strong>${valorFmt}/mês</strong> · Vencimento todo dia <strong>${diaVenc}</strong> · <strong>SEM CARÊNCIA NEM MULTA PARA CANCELAMENTO</strong></div>
       </div>
 
@@ -670,14 +670,15 @@ Quaisquer atualizações substanciais das condições contratuais serão previam
           } catch (_) {}
         }
         if (!dadosContrato || !dadosContrato.clausulas) {
+          const nomeCli = S.licenca?.nome_cliente || S.config?.nome_salao || 'Cliente';
           dadosContrato = {
             codigo_autenticidade: codigoAutenticidade,
             partes: {
               contratada: contratadaDados,
-              contratante: { nome: 'Jerusa Beauty', estabelecimento: 'Jerusa Beauty', whatsapp: telAssinante }
+              contratante: { nome: nomeCli, estabelecimento: S.config?.nome_salao || nomeCli, whatsapp: telAssinante }
             },
-            nome_cliente: 'Jerusa Beauty',
-            nome_estabelecimento: 'Jerusa Beauty',
+            nome_cliente: nomeCli,
+            nome_estabelecimento: S.config?.nome_salao || nomeCli,
             whatsapp: telAssinante,
             valor_mensalidade_centavos: contrato.valor_mensalidade_centavos || 3990,
             dia_vencimento: diaVenc,
@@ -2478,7 +2479,7 @@ async function telaAjustes() {
         <div class="suave pequeno">Ative a sua licença definitiva para manter todos os seus dados, cadastrar clientes e colocar o link com seu Instagram.</div>
       </div>
       <div class="acoes">
-        <a href="https://wa.me/5583988212971?text=${encodeURIComponent('Olá! Estou testando a demonstração de Jerusa Beauty e decidi adquirir o app definitivo!')}" target="_blank" rel="noopener noreferrer" class="botao" style="text-decoration:none">Quero Ativar Minha Licença</a>
+        <a href="https://wa.me/5583988212971?text=${encodeURIComponent(`Olá! Estou testando a demonstração de ${S.config?.nome_salao || S.licenca?.nome_cliente || 'Minha Agenda'} e decidi adquirir o app definitivo!`)}" target="_blank" rel="noopener noreferrer" class="botao" style="text-decoration:none">Quero Ativar Minha Licença</a>
       </div>
     </section>` : ''}
 
@@ -2490,11 +2491,11 @@ async function telaAjustes() {
       <p class="sub-texto">Licença de software sem carência ou fidelidade, confirmada eletronicamente.</p>
       <div class="cartao" style="background:#f8fafc;border:1px solid #cbd5e1;padding:14px;border-radius:12px;margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">
-          <strong style="color:#0f172a">Contrato SysImperium & Jerusa Beauty</strong>
+          <strong style="color:#0f172a">Contrato SysImperium & ${esc(S.licenca?.nome_cliente || S.config?.nome_salao || 'Cliente')}</strong>
           <span class="selo-texto ok" style="background:#dcfce7;color:#166534;font-size:11px;padding:3px 8px;border-radius:999px;font-weight:700">✓ Assinado Digitalmente</span>
         </div>
         <div class="suave pequeno" style="line-height:1.6">
-          • Código de Autenticidade: <strong>${esc(S.licenca.contrato.codigo_autenticidade || 'CT-2026-000001')}</strong><br>
+          • Código de Autenticidade: <strong>${esc(S.licenca.contrato.codigo_autenticidade || '—')}</strong><br>
           • Valor da Adesão: <strong>R$ 39,99</strong><br>
           • Mensalidade: <strong>${moeda(S.licenca.contrato.valor_mensalidade_centavos || S.licenca.valor_mensalidade_centavos || 3990)}/mês</strong> (vencimento todo dia <strong>${S.licenca.contrato.dia_vencimento || S.licenca.dia_vencimento || 10}</strong>)<br>
           • Carência / Fidelidade: <strong>Sem carência nem multa rescisória (cancelamento livre a qualquer momento)</strong><br>
@@ -2670,16 +2671,18 @@ async function telaAjustes() {
         if (res?.sucesso || res?.contrato || res?.clausulas) dadosContrato = res;
       }
       if (!dadosContrato) {
+        const nomeCli = lic.nome_cliente || S.config?.nome_salao || 'Cliente';
+        const whatsCli = lic.contrato.assinado_por_whatsapp || S.config?.whatsapp || '';
         dadosContrato = {
-          codigo_autenticidade: lic.contrato.codigo_autenticidade || 'CT-2026-000001',
+          codigo_autenticidade: lic.contrato.codigo_autenticidade || '',
           partes: {
             contratada: { razao_social: 'SysImperium Soluções Tecnológicas', representante: 'Ian Souza Santos', whatsapp: '(83) 98821-2971' },
-            contratante: { nome: 'Jerusa Beauty', estabelecimento: 'Jerusa Beauty', whatsapp: lic.contrato.assinado_por_whatsapp || '(83) 99667-7643' }
+            contratante: { nome: nomeCli, estabelecimento: S.config?.nome_salao || nomeCli, whatsapp: whatsCli }
           },
-          nome_cliente: 'Jerusa Beauty',
-          nome_estabelecimento: 'Jerusa Beauty',
-          valor_mensalidade_centavos: lic.contrato.valor_mensalidade_centavos || 3990,
-          dia_vencimento: lic.contrato.dia_vencimento || 10,
+          nome_cliente: nomeCli,
+          nome_estabelecimento: S.config?.nome_salao || nomeCli,
+          valor_mensalidade_centavos: lic.contrato.valor_mensalidade_centavos || lic.valor_mensalidade_centavos || 3990,
+          dia_vencimento: lic.contrato.dia_vencimento || lic.dia_vencimento || 10,
           assinado_em: lic.contrato.assinado_em,
           assinado_por_whatsapp: lic.contrato.assinado_por_whatsapp,
           hash_sha256: lic.contrato.hash_sha256,
