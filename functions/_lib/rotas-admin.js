@@ -607,6 +607,20 @@ async function aReceber(db) {
   return results.map((r) => ({ ...r, valor_centavos: r.valor_cobrado_centavos ?? r.preco_tabela_centavos }));
 }
 
+async function listarPendentesFechamento(db, agora, mesFiltro = null) {
+  let sql = `${SELECT_AGEND} WHERE a.status = 'agendado' AND (a.data < ?1 OR (a.data = ?1 AND (a.inicio_min + a.duracao_min) <= ?2))`;
+  const binds = [agora.data, agora.min];
+  if (mesFiltro) {
+    sql += ` AND a.data LIKE ?3`;
+    binds.push(`${mesFiltro}%`);
+  }
+  sql += ` ORDER BY a.data DESC, a.inicio_min DESC LIMIT 100`;
+  const { results = [] } = await db.prepare(sql).bind(...binds).all();
+  if (results.length === 0) return [];
+  const datas = results.map((r) => r.data).sort();
+  return anexarServicos(db, results, datas[0], datas[datas.length - 1]);
+}
+
 rota('GET', '/admin/financeiro', async ({ db, url }) => {
   const mes = url.searchParams.get('mes');
   if (!mesValido(mes)) throw erro(400, 'dado_invalido', 'Mês inválido.');
@@ -616,17 +630,19 @@ rota('GET', '/admin/financeiro', async ({ db, url }) => {
   ).bind(agora.data).first();
   const proximaData = proximaRow?.proxima_data || null;
 
-  const [resumo, anterior, receber, hojeRows, proxRows] = await Promise.all([
+  const [resumo, anterior, receber, hojeRows, proxRows, pendentesMes] = await Promise.all([
     resumoMes(db, mes),
     resumoMes(db, mesAnterior(mes)),
     aReceber(db),
     db.prepare(`SELECT status, pago, forma_pagamento, preco_tabela_centavos, valor_cobrado_centavos FROM agendamentos WHERE data = ?1 AND status != 'cancelado'`).bind(agora.data).all(),
     proximaData ? db.prepare(`SELECT status, preco_tabela_centavos, valor_cobrado_centavos FROM agendamentos WHERE data = ?1 AND status != 'cancelado'`).bind(proximaData).all() : Promise.resolve({ results: [] }),
+    listarPendentesFechamento(db, agora, mes),
   ]);
 
   const faturadoHoje = hojeRows.results.filter((a) => a.status === 'concluido').reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
   const previstoHoje = hojeRows.results.filter((a) => a.status === 'agendado').reduce((s, a) => s + a.preco_tabela_centavos, 0);
   const previstoProx = proxRows.results.filter((a) => a.status === 'agendado').reduce((s, a) => s + a.preco_tabela_centavos, 0);
+  const pendentesMesCentavos = pendentesMes.reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
 
   const hojeFormas = {
     pix: { recebido_centavos: 0, a_receber_centavos: 0, qtd_recebido: 0, qtd_a_receber: 0 },
@@ -662,6 +678,9 @@ rota('GET', '/admin/financeiro', async ({ db, url }) => {
     ...resumo,
     faturado_anterior_centavos: anterior.faturado_centavos,
     a_receber_lista: receber,
+    pendentes_fechamento_mes: pendentesMes,
+    pendentes_fechamento_mes_qtd: pendentesMes.length,
+    pendentes_fechamento_mes_centavos: pendentesMesCentavos,
     hoje: {
       data: agora.data,
       faturado_centavos: faturadoHoje,
@@ -695,7 +714,7 @@ rota('GET', '/admin/painel', async ({ db }) => {
   ).bind(agora.data).first();
   const proximaData = proximaRow?.proxima_data || null;
 
-  const [hoje, proximoDia, resumo, receber, sumidos, proximos, canceladosRecentes, sinalPendentes] = await Promise.all([
+  const [hoje, proximoDia, resumo, receber, sumidos, proximos, canceladosRecentes, sinalPendentes, pendentesFechamento] = await Promise.all([
     listar(db, agora.data, agora.data, `AND a.status != 'cancelado'`),
     proximaData ? listar(db, proximaData, proximaData, `AND a.status != 'cancelado'`) : Promise.resolve([]),
     resumoMes(db, mes),
@@ -709,13 +728,16 @@ rota('GET', '/admin/painel', async ({ db }) => {
       .bind(agora.data, addDias(agora.data, 7)).first(),
     listar(db, agora.data, addDias(agora.data, 30), `AND a.status = 'cancelado' AND (a.cancelamento_dispensado IS NULL OR a.cancelamento_dispensado = 0)`),
     listar(db, agora.data, addDias(agora.data, 60), `AND a.status = 'agendado' AND a.sinal_status = 'pendente'`),
+    listarPendentesFechamento(db, agora),
   ]);
 
   const faturadoHoje = hoje.filter((a) => a.status === 'concluido').reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
   const previstoHoje = hoje.filter((a) => a.status === 'agendado').reduce((s, a) => s + a.preco_tabela_centavos, 0);
   const previstoProx = proximoDia.filter((a) => a.status === 'agendado').reduce((s, a) => s + a.preco_tabela_centavos, 0);
-  const vencidosHoje = hoje.filter((a) => a.status === 'agendado' && agora.min >= a.inicio_min + a.duracao_min);
-  const vencidosHojeTotal = vencidosHoje.reduce((s, a) => s + a.preco_tabela_centavos, 0);
+  const vencidosHoje = pendentesFechamento.filter((a) => a.data === agora.data);
+  const vencidosAnteriores = pendentesFechamento.filter((a) => a.data < agora.data);
+  const pendentesTotalCentavos = pendentesFechamento.reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
+  const vencidosHojeTotal = vencidosHoje.reduce((s, a) => s + (a.valor_cobrado_centavos ?? a.preco_tabela_centavos), 0);
 
   return json({
     hoje: agora.data,
@@ -725,6 +747,10 @@ rota('GET', '/admin/painel', async ({ db }) => {
     previsto_hoje_centavos: previstoHoje,
     vencidos_hoje_qtd: vencidosHoje.length,
     vencidos_hoje_centavos: vencidosHojeTotal,
+    vencidos_anteriores_qtd: vencidosAnteriores.length,
+    pendentes_fechamento: pendentesFechamento,
+    pendentes_fechamento_qtd: pendentesFechamento.length,
+    pendentes_fechamento_centavos: pendentesTotalCentavos,
     proxima_data: proximaData,
     agendamentos_proximo_dia: proximoDia,
     previsto_proximo_dia_centavos: previstoProx,
