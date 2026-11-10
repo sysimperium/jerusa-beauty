@@ -2535,6 +2535,7 @@ async function telaFinanceiro() {
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               <button class="botao pequeno btn-fin-concluir" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;background:#d97706;border-color:#d97706;color:#fff">Concluir / Receber</button>
+              <button class="botao sec pequeno btn-fin-remarcar" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px">Remarcar</button>
               <button class="botao sec pequeno btn-fin-falta" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;color:#dc2626">Faltou</button>
             </div>
           </div>
@@ -2559,6 +2560,11 @@ async function telaFinanceiro() {
     const id = Number(b.dataset.id);
     const a = f.pendentes_fechamento_mes?.find((x) => x.id === id);
     if (a) folhaConcluir(a, telaFinanceiro);
+  }));
+  c.querySelectorAll('.btn-fin-remarcar').forEach((b) => b.addEventListener('click', () => {
+    const id = Number(b.dataset.id);
+    const a = f.pendentes_fechamento_mes?.find((x) => x.id === id);
+    if (a) folhaRemarcar(a, telaFinanceiro);
   }));
   c.querySelectorAll('.btn-fin-falta').forEach((b) => b.addEventListener('click', async () => {
     const id = Number(b.dataset.id);

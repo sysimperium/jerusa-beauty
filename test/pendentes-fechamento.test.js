@@ -19,6 +19,7 @@ test('pendentes-fechamento: public/admin/admin.js possui elementos de atendiment
   assert.match(code, /pendentes_fechamento_mes/);
   assert.match(code, /Fechamentos Pendentes no Mês/);
   assert.match(code, /btn-fin-concluir/);
+  assert.match(code, /btn-fin-remarcar/);
   assert.match(code, /btn-fin-falta/);
 });
 
