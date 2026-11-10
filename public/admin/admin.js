@@ -1492,47 +1492,17 @@ async function telaInicio() {
       ` : ''}
 
       ${pendentesFechamento.length > 0 ? `
-      <div class="card-alerta alerta-vencidos" style="border-left: 4px solid #d97706; background: #fffbeb; padding: 14px 16px; border-radius: 8px; margin-bottom: 20px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; flex-wrap:wrap; gap:8px;">
-          <div>
-            <strong style="color: #b45309; font-size: 1rem; display: flex; align-items:center; gap: 6px;">
-              <span>⏳</span> Atendimentos Pendentes de Fechamento (${pendentesFechamento.length})
-            </strong>
-            <p class="pequeno suave" style="margin: 2px 0 0 0;">
-              ${vencidosAnterioresQtd > 0 ? `<span style="color:#b45309;font-weight:600">${vencidosAnterioresQtd} de dia(s) anterior(es)</span> · ` : ''}
-              Total previsto: <strong>${moeda(totalPendentesFechamento)}</strong>. Conclua para somar ao Faturado ou registre falta.
-            </p>
+      <div class="card-alerta alerta-vencidos">
+        <div class="card-alerta-conteudo">
+          <div class="card-alerta-titulo">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Atendimentos aguardando fechamento</span>
           </div>
-          <button class="botao sec pequeno" id="acao-vencidos" type="button" style="font-size:.75rem;padding:3px 8px">Ver na Agenda →</button>
+          <div class="card-alerta-texto">
+            <strong>${pendentesFechamento.length} atendimento${pendentesFechamento.length === 1 ? '' : 's'}</strong> pendente${pendentesFechamento.length === 1 ? '' : 's'} (${moeda(totalPendentesFechamento)} previstos)${vencidosAnterioresQtd > 0 ? ` · ${vencidosAnterioresQtd} de dia(s) anterior(es)` : ''}.
+          </div>
         </div>
-        <div style="display:flex; flex-direction:column; gap: 8px; margin-top: 10px;">
-          ${pendentesFechamento.slice(0, 10).map((a) => {
-            const ehHoje = a.data === p.hoje;
-            const dataStr = ehHoje ? `Hoje às ${hora(a.inicio_min)}` : `${dataCurta(a.data)} às ${hora(a.inicio_min)}`;
-            return `
-              <div class="item-pendente-fechamento" data-id="${a.id}" style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #fde68a; gap:10px; flex-wrap:wrap;">
-                <div>
-                  <div style="display:flex;align-items:center;gap:6px">
-                    <strong style="font-size:0.92rem">${esc(a.cliente_nome)}</strong>
-                    <span class="selo-texto ${ehHoje ? 'pend' : 'perigo'}" style="${!ehHoje ? 'background:#fee2e2;color:#b91c1c;font-size:10.5px;padding:1px 6px;border-radius:4px' : ''}">
-                      ${ehHoje ? 'Passou do horário' : 'Não finalizado'}
-                    </span>
-                  </div>
-                  <div class="pequeno suave">${dataStr} · ${a.servicos?.map((s) => esc(s.nome)).join(' + ') || 'Serviço'} · <strong>${moeda(a.preco_tabela_centavos)}</strong></div>
-                </div>
-                <div style="display:flex; gap:6px; align-items:center;">
-                  <button class="botao pequeno btn-acao-fechar-atendimento" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;background:#d97706;border-color:#d97706;color:#fff">✓ Concluir / Receber</button>
-                  <button class="botao sec pequeno btn-acao-falta-atendimento" data-id="${a.id}" type="button" style="font-size:.75rem;padding:3px 8px;color:#dc2626">✕ Faltou</button>
-                </div>
-              </div>
-            `;
-          }).join('')}
-          ${pendentesFechamento.length > 10 ? `
-            <div style="text-align:center;margin-top:4px">
-              <span class="suave pequeno">+ ${pendentesFechamento.length - 10} outro(s) atendimento(s) pendente(s)</span>
-            </div>
-          ` : ''}
-        </div>
+        <button class="botao pequeno" id="acao-vencidos" style="background:#d97706;border-color:#d97706;color:#fff">Ver no Financeiro →</button>
       </div>` : ''}
 
       ${p.a_receber_qtd ? `
@@ -1707,38 +1677,7 @@ async function telaInicio() {
     });
   }
   conteudo().querySelector('#ver-grade')?.addEventListener('click', () => ir('agenda'));
-  conteudo().querySelector('#acao-vencidos')?.addEventListener('click', () => {
-    const primeiroPendente = pendentesFechamento[0];
-    if (primeiroPendente?.data) S.dia = primeiroPendente.data;
-    else S.dia = S.hoje;
-    ir('agenda');
-  });
-  conteudo().querySelectorAll('.btn-acao-fechar-atendimento').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = Number(btn.dataset.id);
-      const a = pendentesFechamento.find((x) => x.id === id);
-      if (a) folhaConcluir(a, telaInicio);
-    });
-  });
-  conteudo().querySelectorAll('.btn-acao-falta-atendimento').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.id);
-      const a = pendentesFechamento.find((x) => x.id === id);
-      const ok = await confirmar({
-        titulo: 'Marcar como falta?',
-        mensagem: `Deseja registrar que a cliente ${esc(a?.cliente_nome || '')} não compareceu?`,
-        textoOk: 'Sim, cliente faltou',
-        textoCancelar: 'Voltar',
-        perigo: true,
-      });
-      if (ok) {
-        if (await seguro(() => api(`/admin/agendamentos/${id}`, { metodo: 'PATCH', corpo: { status: 'faltou' } }))) {
-          aviso('Atendimento marcado como falta');
-          telaInicio();
-        }
-      }
-    });
-  });
+  conteudo().querySelector('#acao-vencidos')?.addEventListener('click', () => ir('financeiro'));
   conteudo().querySelector('#acao-cobrar')?.addEventListener('click', () => ir('financeiro'));
   conteudo().querySelector('#acao-divulgar')?.addEventListener('click', folhaDivulgarAgenda);
   conteudo().querySelector('#acao-sumidos')?.addEventListener('click', () => folhaClientesSumidos(p.sumidos, diasSumido, telaInicio));

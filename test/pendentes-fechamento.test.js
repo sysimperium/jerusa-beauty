@@ -10,13 +10,12 @@ const __dirname = dirname(__filename);
 test('pendentes-fechamento: public/admin/admin.js possui elementos de atendimentos pendentes de fechamento', () => {
   const code = readFileSync(join(__dirname, '../public/admin/admin.js'), 'utf8');
 
-  // Verifica elementos na tela de Início (Dashboard)
+  // Verifica elementos na tela de Início (Dashboard limpo com redirecionamento para o Financeiro)
   assert.match(code, /pendentes_fechamento/);
-  assert.match(code, /btn-acao-fechar-atendimento/);
-  assert.match(code, /btn-acao-falta-atendimento/);
-  assert.match(code, /Atendimentos Pendentes de Fechamento/);
+  assert.match(code, /Atendimentos aguardando fechamento/);
+  assert.match(code, /Ver no Financeiro →/);
 
-  // Verifica elementos na tela de Financeiro
+  // Verifica elementos na tela de Financeiro (onde os itens e ações residem)
   assert.match(code, /pendentes_fechamento_mes/);
   assert.match(code, /Fechamentos Pendentes no Mês/);
   assert.match(code, /btn-fin-concluir/);
