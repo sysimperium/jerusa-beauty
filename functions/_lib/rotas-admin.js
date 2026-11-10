@@ -378,15 +378,64 @@ rota('PATCH', '/admin/agendamentos/:id', async ({ db, params, corpo }) => {
   if (!atual) throw erro(404, 'nao_encontrado', 'Agendamento não encontrado.');
   const cfg = await carregarConfig(db);
 
-  if (corpo.data !== undefined || corpo.inicio_min !== undefined) {
+  let novosServicos = null;
+  if (corpo.servicos !== undefined) {
+    novosServicos = await resolverServicos(db, corpo.servicos, { inativos: true });
+  }
+
+  const mudouHorarioOuServico = corpo.data !== undefined || corpo.inicio_min !== undefined || novosServicos !== null;
+  if (mudouHorarioOuServico) {
     const data = corpo.data ?? atual.data;
     if (!dataValida(data)) throw erro(400, 'dado_invalido', 'Data inválida.');
-    const ini = inteiro(corpo.inicio_min ?? atual.inicio_min, 0, 1439, 'Horário');
+    const ini = corpo.inicio_min != null ? inteiro(corpo.inicio_min, 0, 1439, 'Horário') : atual.inicio_min;
+    const dur = novosServicos ? novosServicos.duracao : atual.duracao_min;
+    const preco = novosServicos ? novosServicos.preco : atual.preco_tabela_centavos;
+    const forcar = !!corpo.forcar;
+
+    const sqlCheck = forcar ? '1=1' : sqlSemConflito({
+      d: 2, i: 3, u: 4, l: 5, dl: 6, rs: 7, ignorar: 1,
+    });
+
     const r = await db.prepare(
-      `UPDATE agendamentos SET data = ?2, inicio_min = ?3 WHERE id = ?1 AND ${sqlSemConflito({
-        d: 2, i: 3, u: 4, l: 5, dl: 6, rs: 7, ignorar: 1 })}`
-    ).bind(id, data, ini, atual.duracao_min, atual.local, cfg.deslocamento_min, cfg.respiro_min).run();
-    if (!r.meta.changes) throw erro(409, 'horario_indisponivel', 'Já existe atendimento nesse horário (ou perto demais dele).');
+      `UPDATE agendamentos SET data = ?2, inicio_min = ?3, duracao_min = ?4, preco_tabela_centavos = ?8
+       WHERE id = ?1 AND ${sqlCheck}`
+    ).bind(id, data, ini, dur, atual.local, cfg.deslocamento_min, cfg.respiro_min, preco).run();
+
+    if (!r.meta.changes) {
+      if (!forcar) {
+        const margem = atual.local === 'domicilio' ? cfg.deslocamento_min : cfg.respiro_min;
+        const vizinho = await db.prepare(`
+          SELECT a.id, a.inicio_min, a.duracao_min, c.nome AS cliente_nome
+          FROM agendamentos a
+          JOIN clientes c ON c.id = a.cliente_id
+          WHERE a.data = ?1 AND a.id != ?2 AND a.status IN ('agendado', 'concluido')
+            AND NOT (?3 + ?4 + ?5 <= a.inicio_min OR a.inicio_min + a.duracao_min + ?5 <= ?3)
+          ORDER BY a.inicio_min
+          LIMIT 1
+        `).bind(data, id, ini, dur, margem).first();
+
+        if (vizinho) {
+          throw erro(409, 'choque_horario', 'Intervalo conflita com outro atendimento agendado.', {}, {
+            conflito: {
+              cliente_nome: vizinho.cliente_nome,
+              inicio_min: vizinho.inicio_min,
+              duracao_min: vizinho.duracao_min,
+            },
+          });
+        }
+      }
+      throw erro(409, 'horario_indisponivel', 'Já existe atendimento nesse horário (ou perto demais dele).');
+    }
+
+    if (novosServicos) {
+      const stmts = [
+        db.prepare('DELETE FROM agendamento_servicos WHERE agendamento_id = ?1').bind(id),
+        ...novosServicos.servicos.map((s) => db.prepare(
+          'INSERT INTO agendamento_servicos (agendamento_id, servico_id, nome, preco_centavos, duracao_min) VALUES (?1, ?2, ?3, ?4, ?5)'
+        ).bind(id, s.id, s.nome, s.preco_centavos, s.duracao_min)),
+      ];
+      await db.batch(stmts);
+    }
   }
 
   const sets = [], binds = [];
@@ -395,7 +444,7 @@ rota('PATCH', '/admin/agendamentos/:id', async ({ db, params, corpo }) => {
     if (!['agendado', 'concluido', 'cancelado', 'faltou'].includes(corpo.status)) throw erro(400, 'dado_invalido', 'Status inválido.');
     add('status', corpo.status);
     if (corpo.status === 'concluido' && corpo.valor_cobrado_centavos === undefined && atual.valor_cobrado_centavos == null) {
-      add('valor_cobrado_centavos', atual.preco_tabela_centavos);
+      add('valor_cobrado_centavos', novosServicos ? novosServicos.preco : atual.preco_tabela_centavos);
     }
   }
   if (corpo.valor_cobrado_centavos !== undefined) add('valor_cobrado_centavos', inteiro(corpo.valor_cobrado_centavos, 0, 10000000, 'Valor'));
@@ -408,9 +457,9 @@ rota('PATCH', '/admin/agendamentos/:id', async ({ db, params, corpo }) => {
   if (sets.length) {
     await db.prepare(`UPDATE agendamentos SET ${sets.join(', ')} WHERE id = ?1`).bind(id, ...binds).run();
   }
-  const [linha] = await listar(db, atual.data, atual.data, 'AND a.id = ?3', id);
-  const final = linha || (await listar(db, corpo.data ?? atual.data, corpo.data ?? atual.data, 'AND a.id = ?3', id))[0];
-  return json({ agendamento: final });
+  const dataFinal = corpo.data ?? atual.data;
+  const [linha] = await listar(db, dataFinal, dataFinal, 'AND a.id = ?3', id);
+  return json({ agendamento: linha || null });
 }, { admin: true });
 
 rota('DELETE', '/admin/agendamentos/:id', async ({ db, params }) => {

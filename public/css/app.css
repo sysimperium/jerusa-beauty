@@ -557,6 +557,267 @@ h3.sub { font-size: 1rem; font-weight: 600; margin-top: 28px; }
   .marca img { width: 128px; height: 128px; }
   .horas { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }
+
+/* ---------- Calendário Mensal Aberto (Agenda) ---------- */
+.calendario-container {
+  background: var(--papel);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  padding: 12px 10px;
+  margin-top: 14px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .03);
+}
+.calendario-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+.calendario-mes-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calendario-mes-titulo {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--tinta);
+  letter-spacing: -0.2px;
+  text-transform: capitalize;
+}
+.icone-btn.pequeno {
+  width: 32px;
+  height: 32px;
+}
+.icone-btn.pequeno svg {
+  width: 16px;
+  height: 16px;
+}
+.calendario-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+.cal-dia-semana {
+  text-align: center;
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--suave);
+  text-transform: uppercase;
+  padding: 4px 0 6px;
+  letter-spacing: .4px;
+}
+.cal-dia {
+  min-height: 64px;
+  background: #faf8f5;
+  border: 1px solid var(--linha);
+  border-radius: 8px;
+  padding: 4px 3px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  position: relative;
+  text-align: left;
+  overflow: hidden;
+}
+.cal-dia:hover {
+  background: #fff;
+  border-color: var(--ouro);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+}
+.cal-dia.outro-mes {
+  opacity: .3;
+  background: transparent;
+  cursor: default;
+  border-color: transparent;
+}
+.cal-dia-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1px;
+  padding: 0 2px;
+}
+.cal-num {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--grafite);
+  line-height: 1;
+}
+/* Destaque do DIA DE HOJE */
+.cal-dia.hoje {
+  border: 2px solid var(--ouro) !important;
+  background: #fffdf7 !important;
+}
+.cal-dia.hoje .cal-num {
+  background: var(--ouro);
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 5px;
+  font-size: .7rem;
+}
+.cal-badge-hoje {
+  font-size: .62rem;
+  font-weight: 700;
+  color: var(--ouro-escuro);
+  text-transform: uppercase;
+  letter-spacing: .2px;
+}
+/* Destaque do DIA SELECIONADO */
+.cal-dia.selecionado {
+  box-shadow: inset 0 0 0 2px var(--tinta) !important;
+  border-color: var(--tinta) !important;
+}
+.cal-atendimentos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  width: 100%;
+}
+.cal-pill {
+  font-size: .66rem;
+  line-height: 1.15;
+  padding: 2px 3px;
+  border-radius: 4px;
+  background: var(--papel);
+  border: 1px solid var(--linha);
+  color: var(--tinta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.cal-pill .cal-hora {
+  font-weight: 700;
+  color: var(--ouro-escuro);
+  font-size: .63rem;
+  flex: none;
+}
+.cal-pill .cal-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-pill.concluido {
+  background: var(--ok-claro);
+  border-color: rgba(47, 107, 59, .25);
+  color: var(--ok);
+}
+.cal-pill.concluido .cal-hora {
+  color: var(--ok);
+}
+.cal-mais {
+  font-size: .62rem;
+  font-weight: 600;
+  color: var(--suave);
+  padding: 0 2px;
+  text-align: right;
+  line-height: 1;
+}
+.divisor-agenda-dia {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1.5px solid var(--linha);
+}
+.divisor-agenda-dia h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--tinta);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 719px) {
+  .calendario-container {
+    padding: 10px 4px;
+    margin-left: -10px;
+    margin-right: -10px;
+    border-radius: 12px;
+  }
+  .calendario-grid {
+    gap: 2px;
+  }
+  .cal-dia {
+    min-height: 70px;
+    padding: 3px 2px;
+    border-radius: 6px;
+  }
+  .cal-dia-topo {
+    margin-bottom: 2px;
+  }
+  .cal-num {
+    font-size: .75rem;
+    padding: 1px 2px;
+  }
+  .cal-badge-hoje {
+    font-size: .56rem;
+  }
+  .cal-pill {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 2px 3px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+  }
+  .cal-pill .cal-hora {
+    font-size: .60rem;
+    line-height: 1.1;
+    font-weight: 700;
+  }
+  .cal-pill .cal-nome {
+    font-size: .66rem;
+    line-height: 1.15;
+    font-weight: 600;
+    width: 100%;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cal-mais {
+    font-size: .60rem;
+    line-height: 1;
+    padding: 1px 2px;
+  }
+}
+@media (min-width: 720px) {
+  .calendario-container {
+    padding: 16px 14px;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .cal-dia {
+    min-height: 78px;
+    padding: 6px 5px;
+  }
+  .cal-pill {
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
+    font-size: .72rem;
+    padding: 2px 5px;
+  }
+  .cal-pill .cal-hora {
+    font-size: .68rem;
+  }
+  .cal-pill .cal-nome {
+    font-size: inherit;
+    font-weight: 500;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
   .selo circle, .selo path { stroke-dashoffset: 0; }

@@ -840,6 +840,7 @@ function abrirAtendimento(a, recarregar) {
       ${a.status === 'concluido' && a.forma_pagamento === 'pix' && !a.pago ? '<button class="botao sec" data-acao="qr">Mostrar QR Pix</button>' : ''}
       <a class="botao sec" href="${linkWhatsapp(a.cliente_whatsapp, aberto ? msgCliente : '')}">Falar com WhatsApp</a>
       ${dom && a.endereco ? `<a class="botao sec" href="${maps(a.endereco)}" target="_blank" rel="noopener">Abrir com mapa</a>` : ''}
+      ${aberto ? '<button class="botao sec" data-acao="editar">✏️ Editar atendimento</button>' : ''}
       ${aberto ? '<button class="botao sec" data-acao="remarcar">Remarcar</button>' : ''}
       ${aberto && a.sinal_status !== 'pendente' ? '<div class="acoes duas"><button class="botao sec" data-acao="faltou">Faltou</button><button class="botao perigo" data-acao="cancelar">Cancelar</button></div>' : ''}
       ${!aberto ? '<button class="botao sec" data-acao="reabrir">Voltar para agendado</button>' : ''}
@@ -901,6 +902,7 @@ function abrirAtendimento(a, recarregar) {
         if (ok) return atualizar({ status: 'cancelado' }, 'Atendimento cancelado');
       }
       if (acao === 'remarcar') return folhaRemarcar(a, recarregar);
+      if (acao === 'editar') return folhaEditarAtendimento(a, recarregar);
     }));
   });
 }
@@ -937,6 +939,182 @@ function folhaRemarcadoSucesso(a, novaData, novoMin, recarregar) {
       <button class="botao sec" id="fechar-remarcado">Concluir</button>
     </div>`, (f) => {
     f.querySelector('#fechar-remarcado').addEventListener('click', () => { fecharFolha(); aviso('Horário atualizado'); recarregar(); });
+  });
+}
+
+async function folhaEditarAtendimento(a, recarregar) {
+  const sv = await seguro(() => api('/admin/servicos'));
+  if (!sv) return;
+
+  const todosServicos = sv.servicos || [];
+  const servicos = todosServicos.filter((s) => s.ativo || (a.servicos || []).some((x) => (x.servico_id ?? x.id) === s.id));
+  const sel = new Set((a.servicos || []).map((x) => Number(x.servico_id ?? x.id)));
+
+  folha(`<h2>Editar atendimento</h2>
+    <p class="suave"><strong>${esc(a.cliente_nome)}</strong> · ${nomeLocal(a.local)}</p>
+
+    <div class="campo">
+      <label for="ed-data">Data</label>
+      <input id="ed-data" type="date" value="${a.data}">
+    </div>
+
+    <div class="campo">
+      <label for="ed-hora">Horário de início</label>
+      <input id="ed-hora" type="time" value="${minParaCampo(a.inicio_min)}" step="300">
+    </div>
+
+    <div class="campo">
+      <span class="rotulo">Serviços</span>
+      <p class="suave pequeno" style="margin:2px 0 8px">Toque para selecionar ou desmarcar os serviços deste atendimento:</p>
+      <div class="lista" id="ed-servicos">
+        ${servicos.map((s) => `
+          <button type="button" class="opcao" data-id="${s.id}" aria-pressed="${sel.has(s.id)}">
+            <span class="anel"></span>
+            <span>
+              <span class="nome">${esc(s.nome)}</span>
+              <span class="detalhe" style="display:block">${duracao(s.duracao_min)}</span>
+            </span>
+            <span class="preco">${moeda(s.preco_centavos)}</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="campo">
+      <label for="ed-obs">Observações / anotações</label>
+      <input id="ed-obs" maxlength="300" value="${esc(a.observacoes || '')}" placeholder="Anotações sobre a cliente...">
+    </div>
+
+    <div id="ed-resumo" style="margin:14px 0;background:var(--marfim);border:1px solid var(--linha);border-radius:12px;padding:12px 14px"></div>
+    <div id="ed-msg"></div>
+
+    <div class="acoes">
+      <button class="botao" id="ed-salvar">Salvar alterações</button>
+      <button class="botao sec" id="ed-voltar">Voltar</button>
+    </div>`, (f) => {
+    
+    const resumo = () => {
+      const s = servicos.filter((x) => sel.has(x.id));
+      const totalPreco = s.reduce((t, x) => t + x.preco_centavos, 0);
+      const totalDur = s.reduce((t, x) => t + x.duracao_min, 0);
+      const minAtual = campoParaMin(f.querySelector('#ed-hora').value);
+
+      const terminoStr = minAtual != null ? ` às ${hora(minAtual)} até ${hora(minAtual + totalDur)}` : '';
+      let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong>${s.length} serviço(s) selecionado(s)</strong>
+        <strong style="color:var(--ouro-escuro);font-size:1.05rem">${moeda(totalPreco)}</strong>
+      </div>
+      <div class="suave pequeno">⏱️ Duração total: <strong>${duracao(totalDur)}</strong>${terminoStr}</div>`;
+
+      if (a.sinal_pago && (a.sinal_valor_centavos || 0) > 0) {
+        const saldo = Math.max(0, totalPreco - a.sinal_valor_centavos);
+        html += `<div class="suave pequeno" style="margin-top:4px;color:var(--ok)">✓ Sinal de ${moeda(a.sinal_valor_centavos)} já pago (saldo restante: ${moeda(saldo)})</div>`;
+      }
+      f.querySelector('#ed-resumo').innerHTML = html;
+    };
+
+    resumo();
+
+    f.querySelectorAll('#ed-servicos .opcao').forEach((b) => b.addEventListener('click', () => {
+      const id = Number(b.dataset.id);
+      ajustarExclusividadeServicos(servicos, sel, id);
+      f.querySelectorAll('#ed-servicos .opcao').forEach((x) => {
+        const xId = Number(x.dataset.id);
+        x.setAttribute('aria-pressed', sel.has(xId));
+      });
+      resumo();
+    }));
+
+    f.querySelector('#ed-data').addEventListener('change', resumo);
+    f.querySelector('#ed-hora').addEventListener('input', resumo);
+
+    f.querySelector('#ed-voltar').addEventListener('click', () => {
+      fecharFolha();
+      abrirAtendimento(a, recarregar);
+    });
+
+    const salvar = async (forcar = false) => {
+      const msg = (t) => (f.querySelector('#ed-msg').innerHTML = `<div class="aviso erro" role="alert" style="margin-top:10px">${esc(t)}</div>`);
+      f.querySelector('#ed-msg').innerHTML = '';
+
+      if (sel.size === 0) return msg('Selecione pelo menos um serviço.');
+      const dataVal = f.querySelector('#ed-data').value;
+      const minVal = campoParaMin(f.querySelector('#ed-hora').value);
+      if (!dataVal || minVal == null) return msg('Informe data e horário válidos.');
+
+      const btn = f.querySelector('#ed-salvar');
+      btn.disabled = true;
+
+      try {
+        const corpo = {
+          servicos: [...sel],
+          data: dataVal,
+          inicio_min: minVal,
+          observacoes: f.querySelector('#ed-obs').value.trim(),
+        };
+        if (forcar) corpo.forcar = true;
+
+        const resp = await api(`/admin/agendamentos/${a.id}`, { metodo: 'PATCH', corpo });
+        fecharFolha();
+        aviso('Atendimento atualizado!');
+        recarregar();
+
+        const sNovos = servicos.filter((x) => sel.has(x.id));
+        const mudouDataOuHora = dataVal !== a.data || minVal !== a.inicio_min;
+        const mudouServicos = sel.size !== a.servicos.length || !a.servicos.every((as) => sel.has(as.servico_id ?? as.id));
+        
+        if ((mudouDataOuHora || mudouServicos) && a.cliente_whatsapp) {
+          const dadosAtualizados = resp?.agendamento || {
+            ...a,
+            data: dataVal,
+            inicio_min: minVal,
+            duracao_min: sNovos.reduce((t, x) => t + x.duracao_min, 0),
+            servicos: sNovos,
+          };
+          folhaEditadoSucesso(a, dadosAtualizados, recarregar);
+        }
+      } catch (err) {
+        btn.disabled = false;
+        if (err.dados?.codigo === 'choque_horario' || err.dados?.conflito) {
+          const c = err.dados.conflito;
+          f.querySelector('#ed-msg').innerHTML = `
+            <div class="aviso erro" style="margin-top:10px" role="alert">
+              ⚠️ <strong>Conflito de horário!</strong><br>
+              Conflita com o agendamento de <strong>${esc(c?.cliente_nome || 'outra cliente')}</strong> (${hora(c?.inicio_min || 0)} às ${hora((c?.inicio_min || 0) + (c?.duracao_min || 0))}).
+              <div style="margin-top:10px">
+                <button type="button" class="botao perigo pequeno" id="ed-forcar">Salvar mesmo assim</button>
+              </div>
+            </div>`;
+          f.querySelector('#ed-forcar')?.addEventListener('click', () => salvar(true));
+        } else {
+          msg(err.message || 'Erro ao salvar alterações.');
+        }
+      }
+    };
+
+    f.querySelector('#ed-salvar').addEventListener('click', () => salvar(false));
+  });
+}
+
+function folhaEditadoSucesso(antigo, novo, recarregar) {
+  const nomesServicos = (novo.servicos || []).map((s) => s.nome).join(' + ');
+  const msgWhats = `Olá, ${novo.cliente_nome.split(' ')[0]}! Seu agendamento foi atualizado: ${nomesServicos}, ${dataLonga(novo.data)} às ${hora(novo.inicio_min)}. Qualquer dúvida, estou por aqui! 💅`;
+
+  folha(`<h2>Atendimento atualizado!</h2>
+    <p class="suave">Alterações salvas com sucesso para <strong>${esc(novo.cliente_nome)}</strong>:</p>
+    <div class="aviso" style="margin:16px 0;background:rgba(212,175,55,.12);border-color:rgba(212,175,55,.4);color:var(--texto)">
+      <strong style="font-size:16px;display:block">${esc(dataLonga(novo.data))} às ${hora(novo.inicio_min)}</strong>
+      <span class="pequecom suave" style="display:block;margin-top:4px">${esc(nomesServicos)} · ${nomeLocal(novo.local)}</span>
+    </div>
+    <p class="suave pequeno" style="margin-bottom:16px">Deseja avisar a cliente pelo WhatsApp sobre a alteração?</p>
+    <div class="acoes">
+      <a class="botao" href="${linkWhatsapp(novo.cliente_whatsapp, msgWhats)}" target="_blank" rel="noopener">Avisar cliente com WhatsApp</a>
+      <button class="botao sec" id="fechar-editado">Concluir</button>
+    </div>`, (f) => {
+    f.querySelector('#fechar-editado').addEventListener('click', () => {
+      fecharFolha();
+      recarregar();
+    });
   });
 }
 
@@ -1569,12 +1747,33 @@ async function telaInicio() {
 // ======================================================================== agenda
 async function telaAgenda() {
   const dia = S.dia;
-  const r = await seguro(() => api(`/admin/agendamentos?de=${dia}&ate=${dia}`));
+
+  // Mês exibido no calendário aberto (topo)
+  const mesAtual = S.mesAgenda || dia.slice(0, 7);
+  S.mesAgenda = mesAtual;
+
+  const [anoStr, mesStr] = mesAtual.split('-');
+  const ano = parseInt(anoStr, 10);
+  const mes = parseInt(mesStr, 10);
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const primeiroDiaSem = new Date(Date.UTC(ano, mes - 1, 1)).getUTCDay(); // 0 = Domingo, ..., 6 = Sábado
+
+  const deMes = `${anoStr}-${mesStr}-01`;
+  const ateMes = `${anoStr}-${mesStr}-${String(diasNoMes).padStart(2, '0')}`;
+
+  let deReq = deMes;
+  let ateReq = ateMes;
+  if (dia < deReq) deReq = dia;
+  if (dia > ateReq) ateReq = dia;
+
+  const r = await seguro(() => api(`/admin/agendamentos?de=${deReq}&ate=${ateReq}`));
   const cfgAll = await seguro(() => api('/admin/config'));
   if (!r || !cfgAll) return;
   S.config = cfgAll.config;
+
+  const todos = r.agendamentos || [];
+  const lista = todos.filter((a) => a.data === dia);
   const bloqueios = cfgAll.bloqueios.filter((b) => b.data === dia);
-  const lista = r.agendamentos;
   const ativos = lista.filter((a) => a.status !== 'cancelado');
   const agendados = lista.filter((a) => a.status === 'agendado');
   const concluidos = lista.filter((a) => a.status === 'concluido');
@@ -1586,9 +1785,62 @@ async function telaAgenda() {
   const agoraMin = dia === S.hoje ? new Date(Date.now() - 3 * 3600000).getUTCHours() * 60 + new Date(Date.now() - 3 * 3600000).getUTCMinutes() : null;
   const vencidos = dia === S.hoje && agoraMin != null ? agendados.filter((a) => agoraMin >= a.inicio_min + a.duracao_min) : [];
 
+  // Mapeamento do mês para o calendário (apenas agendados e concluídos)
+  const porData = {};
+  for (const a of todos) {
+    if (a.status === 'cancelado') continue;
+    if (!porData[a.data]) porData[a.data] = [];
+    porData[a.data].push(a);
+  }
+  for (const k in porData) {
+    porData[k].sort((x, y) => x.inicio_min - y.inicio_min);
+  }
+
+  const tituloMes = mesAno(mesAtual);
+  const totalMes = todos.filter((a) => a.data.startsWith(mesAtual) && a.status !== 'cancelado').length;
+
+  let gridDiasHtml = '';
+  for (let i = 0; i < primeiroDiaSem; i++) {
+    gridDiasHtml += `<div class="cal-dia outro-mes" aria-hidden="true"></div>`;
+  }
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dataIso = `${anoStr}-${mesStr}-${String(d).padStart(2, '0')}`;
+    const ehHoje = (dataIso === S.hoje);
+    const ehSel = (dataIso === dia);
+    const agsDia = porData[dataIso] || [];
+    const maxVisiveis = 2;
+    const visiveis = agsDia.slice(0, maxVisiveis);
+    const restantes = agsDia.length - maxVisiveis;
+
+    const pillsHtml = visiveis.map((a) => `
+      <div class="cal-pill ${a.status === 'concluido' ? 'concluido' : ''}" title="${hora(a.inicio_min)} - ${esc(a.cliente_nome)}">
+        <span class="cal-hora">${hora(a.inicio_min)}</span>
+        <span class="cal-nome">${esc(a.cliente_nome.split(' ')[0])}</span>
+      </div>
+    `).join('');
+
+    const maisHtml = restantes > 0 ? `<div class="cal-mais">+${restantes} mais</div>` : '';
+
+    gridDiasHtml += `
+      <div class="cal-dia ${ehHoje ? 'hoje' : ''} ${ehSel ? 'selecionado' : ''}" data-dia-cal="${dataIso}" role="button" tabindex="0" aria-label="${d} de ${tituloMes}, ${agsDia.length} atendimento(s)">
+        <div class="cal-dia-topo">
+          <span class="cal-num">${d}</span>
+          ${ehHoje ? '<span class="cal-badge-hoje">Hoje</span>' : ''}
+        </div>
+        <div class="cal-atendimentos">
+          ${pillsHtml}
+          ${maisHtml}
+        </div>
+      </div>
+    `;
+  }
+
   conteudo().innerHTML = `
     <header class="cabeca">
-      <div><h1 class="assinatura">Agenda</h1><p>${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''} · ${agendados.length} a atender · ${concluidos.length} já atendido(s)</p></div>
+      <div>
+        <h1 class="assinatura">Agenda</h1>
+        <p>${totalMes} atendimento(s) em ${esc(tituloMes)}</p>
+      </div>
       ${(S.licenca && !S.licenca.isento_mensalidade) ? `
         <button class="icone-btn-mensalidade ${S.licenca.aviso_atraso ? 'atraso' : ''}" id="btn-mensalidade-agenda" type="button" title="Ver faturas e pagar com Pix">
           <span class="ponto-status ${S.licenca.aviso_atraso ? 'atraso' : ''}"></span>
@@ -1596,77 +1848,151 @@ async function telaAgenda() {
         </button>
       ` : ''}
     </header>
-    <div class="nav-data">
-      <button class="icone-btn" id="ant" aria-label="Dia anterior">${icone('esq')}</button>
-      <label class="data-atual" style="display:grid;place-items:center;position:relative"><span>${esc(dataLonga(dia))}</span>
-        <input id="pular" type="date" value="${dia}" aria-label="Escolher data" style="position:absolute;inset:0;opacity:0;width:100%;cursor:pointer"></label>
-      <button class="icone-btn" id="prox" aria-label="Próximo dia">${icone('dir')}</button>
-    </div>
-    ${dia !== S.hoje ? '<p style="text-align:center;margin-top:10px"><button class="link" id="hojeb">Voltar para hoje</button></p>' : ''}
-    ${canceladosHoje.length > 0 ? `
-      <div class="aviso-cancelados" style="background:#fff1f2;border:1px solid #fecdd3;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <strong style="color:#e11d48;font-size:0.9rem">⚠️ ${canceladosHoje.length} atendimento(s) cancelado(s) / liberado(s) nesta data</strong>
-          <div class="pequecom suave">${canceladosHoje.map((c) => esc(c.cliente_nome) + ' (' + hora(c.inicio_min) + (c.sinal_status === 'recusado' ? ` · falta de sinal ${c.sinal_porcentagem || 30}%` : ' · cancelado pelo cliente') + ')').join(', ')}</div>
+
+    <!-- CALENDÁRIO ABERTO DO MÊS INTEIRO (NO TOPO) -->
+    <section class="calendario-container" aria-label="Visão geral do mês">
+      <div class="calendario-topo">
+        <div class="calendario-mes-nav">
+          <button class="icone-btn pequeno" id="cal-mes-ant" type="button" aria-label="Mês anterior">${icone('esq')}</button>
+          <span class="calendario-mes-titulo">${esc(tituloMes)}</span>
+          <button class="icone-btn pequeno" id="cal-mes-prox" type="button" aria-label="Próximo mês">${icone('dir')}</button>
         </div>
-        <button class="botao sec pequeno" id="atalho-ver-cancelados" type="button" style="font-size:0.75rem">Ver detalhes</button>
+        ${mesAtual !== S.hoje.slice(0, 7) ? '<button class="link pequeno" id="cal-mes-hoje" type="button" style="font-size:0.8rem">Voltar para o mês atual</button>' : ''}
       </div>
-    ` : ''}
-    ${bloqueios.map((b) => `<div class="aviso">Bloqueado${b.inicio_min === 0 && b.fim_min === 1440 ? ' o dia todo' : `: ${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ` · ${esc(b.motivo)}` : ''}</div>`).join('')}
+      <div class="calendario-grid">
+        <div class="cal-dia-semana">Dom</div>
+        <div class="cal-dia-semana">Seg</div>
+        <div class="cal-dia-semana">Ter</div>
+        <div class="cal-dia-semana">Qua</div>
+        <div class="cal-dia-semana">Qui</div>
+        <div class="cal-dia-semana">Sex</div>
+        <div class="cal-dia-semana">Sáb</div>
+        ${gridDiasHtml}
+      </div>
+    </section>
 
-    ${lista.length > 0 ? `
-    <div class="segmentos-filtro" id="filtro-agenda">
-      <button type="button" class="filtro-btn" data-filtro="todos" aria-pressed="true">Todos (${lista.length})</button>
-      <button type="button" class="filtro-btn" data-filtro="agendados" aria-pressed="false">A atender (${agendados.length})</button>
-      ${pendentesSinal.length > 0 ? `<button type="button" class="filtro-btn" data-filtro="sinal" aria-pressed="false" style="color:var(--perigo, #b91c1c);font-weight:600">⏳ Sinal (${pendentesSinal.length})</button>` : ''}
-      <button type="button" class="filtro-btn" data-filtro="concluidos" aria-pressed="false">Já atendidos (${concluidos.length})</button>
-      ${outros.length ? `<button type="button" class="filtro-btn" data-filtro="outros" aria-pressed="false">Cancelados (${outros.length})</button>` : ''}
-    </div>` : ''}
+    <!-- DETALHES DO DIA SELECIONADO ("DIA A DIA" MOVIDO PARA BAIXO) -->
+    <div id="secao-dia-detalhes" style="scroll-margin-top: 16px">
+      <div class="divisor-agenda-dia">
+        <h2><span>📅 Atendimentos do Dia</span></h2>
+        <span class="suave pequeno">${ativos.length} atendimento(s)${dia === S.hoje ? ' hoje' : ''}</span>
+      </div>
 
-    <div style="margin-top:12px" id="lista-agenda-container">
-      ${lista.length === 0 ? '<p class="vazio">Nada marcado para este dia.</p>' : `
-        <div class="secao-agenda" id="secao-agendados" ${agendados.length === 0 ? 'hidden' : ''}>
-          <div class="secao-agenda-topo">
-            <span class="secao-agenda-titulo">A atender (${agendados.length})</span>
-            <span style="display:flex;align-items:center;gap:6px">
-              ${vencidos.length > 0 ? `<span class="selo-texto atencao">${vencidos.length} aguardando baixa</span>` : ''}
-              <span class="suave pequeno">${moeda(totalAgendado)} previsto</span>
-            </span>
+      <div class="nav-data">
+        <button class="icone-btn" id="ant" aria-label="Dia anterior">${icone('esq')}</button>
+        <label class="data-atual" style="display:grid;place-items:center;position:relative"><span>${esc(dataLonga(dia))}</span>
+          <input id="pular" type="date" value="${dia}" aria-label="Escolher data" style="position:absolute;inset:0;opacity:0;width:100%;cursor:pointer"></label>
+        <button class="icone-btn" id="prox" aria-label="Próximo dia">${icone('dir')}</button>
+      </div>
+      ${dia !== S.hoje ? '<p style="text-align:center;margin-top:10px"><button class="link" id="hojeb">Voltar para hoje</button></p>' : ''}
+      ${canceladosHoje.length > 0 ? `
+        <div class="aviso-cancelados" style="background:#fff1f2;border:1px solid #fecdd3;padding:10px 14px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <strong style="color:#e11d48;font-size:0.9rem">⚠️ ${canceladosHoje.length} atendimento(s) cancelado(s) / liberado(s) nesta data</strong>
+            <div class="pequecom suave">${canceladosHoje.map((c) => esc(c.cliente_nome) + ' (' + hora(c.inicio_min) + (c.sinal_status === 'recusado' ? ` · falta de sinal ${c.sinal_porcentagem || 30}%` : ' · cancelado pelo cliente') + ')').join(', ')}</div>
           </div>
-          <div class="lista-atendimentos">
-            ${agendados.map((a) => linhaAtendimento(a, agoraMin)).join('')}
-          </div>
+          <button class="botao sec pequeno" id="atalho-ver-cancelados" type="button" style="font-size:0.75rem">Ver detalhes</button>
         </div>
+      ` : ''}
+      ${bloqueios.map((b) => `<div class="aviso">Bloqueado${b.inicio_min === 0 && b.fim_min === 1440 ? ' o dia todo' : `: ${hora(b.inicio_min)} às ${hora(b.fim_min)}`}${b.motivo ? ` · ${esc(b.motivo)}` : ''}</div>`).join('')}
 
-        <div class="secao-agenda concluidos" id="secao-concluidos" style="${concluidos.length > 0 && agendados.length > 0 ? 'margin-top:20px' : ''}" ${concluidos.length === 0 ? 'hidden' : ''}>
-          <div class="secao-agenda-topo">
-            <span class="secao-agenda-titulo" style="display:flex;align-items:center;gap:6px">
-              <span style="color:var(--ok)">✓</span> Já atendidos (${concluidos.length})
-            </span>
-            <span class="selo-texto ok">${moeda(totalConcluido)} realizado</span>
-          </div>
-          <div class="lista-atendimentos">
-            ${concluidos.map((a) => linhaAtendimento(a, agoraMin)).join('')}
-          </div>
-        </div>
+      ${lista.length > 0 ? `
+      <div class="segmentos-filtro" id="filtro-agenda">
+        <button type="button" class="filtro-btn" data-filtro="todos" aria-pressed="true">Todos (${lista.length})</button>
+        <button type="button" class="filtro-btn" data-filtro="agendados" aria-pressed="false">A atender (${agendados.length})</button>
+        ${pendentesSinal.length > 0 ? `<button type="button" class="filtro-btn" data-filtro="sinal" aria-pressed="false" style="color:var(--perigo, #b91c1c);font-weight:600">⏳ Sinal (${pendentesSinal.length})</button>` : ''}
+        <button type="button" class="filtro-btn" data-filtro="concluidos" aria-pressed="false">Já atendidos (${concluidos.length})</button>
+        ${outros.length ? `<button type="button" class="filtro-btn" data-filtro="outros" aria-pressed="false">Cancelados (${outros.length})</button>` : ''}
+      </div>` : ''}
 
-        ${outros.length ? `
-        <details class="secao-agenda" id="secao-outros" style="margin-top:16px">
-          <summary class="suave pequeno" style="cursor:pointer;padding:6px 0">Cancelados e faltas (${outros.length})</summary>
-          <div class="lista-atendimentos" style="margin-top:8px">
-            ${outros.map((a) => linhaAtendimento(a, agoraMin)).join('')}
+      <div style="margin-top:12px" id="lista-agenda-container">
+        ${lista.length === 0 ? '<p class="vazio">Nada marcado para este dia.</p>' : `
+          <div class="secao-agenda" id="secao-agendados" ${agendados.length === 0 ? 'hidden' : ''}>
+            <div class="secao-agenda-topo">
+              <span class="secao-agenda-titulo">A atender (${agendados.length})</span>
+              <span style="display:flex;align-items:center;gap:6px">
+                ${vencidos.length > 0 ? `<span class="selo-texto atencao">${vencidos.length} aguardando baixa</span>` : ''}
+                <span class="suave pequeno">${moeda(totalAgendado)} previsto</span>
+              </span>
+            </div>
+            <div class="lista-atendimentos">
+              ${agendados.map((a) => linhaAtendimento(a, agoraMin)).join('')}
+            </div>
           </div>
-        </details>` : ''}
-      `}
-    </div>
 
-    <div class="acoes duas" style="margin-top:24px"><button class="botao" id="novo">Novo agendamento</button><button class="botao sec" id="bloquear">Bloquear horário</button></div>`;
+          <div class="secao-agenda concluidos" id="secao-concluidos" style="${concluidos.length > 0 && agendados.length > 0 ? 'margin-top:20px' : ''}" ${concluidos.length === 0 ? 'hidden' : ''}>
+            <div class="secao-agenda-topo">
+              <span class="secao-agenda-titulo" style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--ok)">✓</span> Já atendidos (${concluidos.length})
+              </span>
+              <span class="selo-texto ok">${moeda(totalConcluido)} realizado</span>
+            </div>
+            <div class="lista-atendimentos">
+              ${concluidos.map((a) => linhaAtendimento(a, agoraMin)).join('')}
+            </div>
+          </div>
+
+          ${outros.length ? `
+          <details class="secao-agenda" id="secao-outros" style="margin-top:16px">
+            <summary class="suave pequeno" style="cursor:pointer;padding:6px 0">Cancelados e faltas (${outros.length})</summary>
+            <div class="lista-atendimentos" style="margin-top:8px">
+              ${outros.map((a) => linhaAtendimento(a, agoraMin)).join('')}
+            </div>
+          </details>` : ''}
+        `}
+      </div>
+
+      <div class="acoes duas" style="margin-top:24px"><button class="botao" id="novo">Novo agendamento</button><button class="botao sec" id="bloquear">Bloquear horário</button></div>
+    </div>`;
 
   const c = conteudo();
-  c.querySelector('#ant').addEventListener('click', () => { S.dia = somaDias(dia, -1); telaAgenda(); });
-  c.querySelector('#prox').addEventListener('click', () => { S.dia = somaDias(dia, 1); telaAgenda(); });
-  c.querySelector('#hojeb')?.addEventListener('click', () => { S.dia = S.hoje; telaAgenda(); });
-  c.querySelector('#pular').addEventListener('change', (e) => { if (e.target.value) { S.dia = e.target.value; telaAgenda(); } });
+  c.querySelector('#cal-mes-ant')?.addEventListener('click', () => {
+    S.mesAgenda = somaMeses(mesAtual, -1);
+    telaAgenda();
+  });
+  c.querySelector('#cal-mes-prox')?.addEventListener('click', () => {
+    S.mesAgenda = somaMeses(mesAtual, 1);
+    telaAgenda();
+  });
+  c.querySelector('#cal-mes-hoje')?.addEventListener('click', () => {
+    S.mesAgenda = S.hoje.slice(0, 7);
+    S.dia = S.hoje;
+    telaAgenda();
+  });
+
+  c.querySelectorAll('[data-dia-cal]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const dSel = el.dataset.diaCal;
+      if (dSel) {
+        S.dia = dSel;
+        S.mesAgenda = dSel.slice(0, 7);
+        telaAgenda();
+      }
+    });
+  });
+
+  c.querySelector('#ant').addEventListener('click', () => {
+    S.dia = somaDias(dia, -1);
+    S.mesAgenda = S.dia.slice(0, 7);
+    telaAgenda();
+  });
+  c.querySelector('#prox').addEventListener('click', () => {
+    S.dia = somaDias(dia, 1);
+    S.mesAgenda = S.dia.slice(0, 7);
+    telaAgenda();
+  });
+  c.querySelector('#hojeb')?.addEventListener('click', () => {
+    S.dia = S.hoje;
+    S.mesAgenda = S.hoje.slice(0, 7);
+    telaAgenda();
+  });
+  c.querySelector('#pular').addEventListener('change', (e) => {
+    if (e.target.value) {
+      S.dia = e.target.value;
+      S.mesAgenda = S.dia.slice(0, 7);
+      telaAgenda();
+    }
+  });
   c.querySelector('#novo').addEventListener('click', () => folhaNovo(dia, telaAgenda));
   c.querySelector('#bloquear').addEventListener('click', () => folhaBloquear(dia, telaAgenda));
 

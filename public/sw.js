@@ -1,7 +1,7 @@
 // Service worker: guarda a "casca" do app para abrir rápido e funcionar sem sinal.
 // Os dados (API) nunca são guardados: sempre vêm do servidor.
-const VERSAO = 'v10';
-const CACHE = `jussara-${VERSAO}`;
+const VERSAO = 'v13';
+const CACHE = `jerusa-${VERSAO}`;
 const CASCA = [
   '/', '/admin/', '/css/app.css', '/js/comum.js', '/js/cliente.js', '/js/pix.js', '/js/vendor/qrcode.js',
   '/admin/admin.js', '/img/logo.png', '/bio/bio.js',
